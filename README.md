@@ -77,6 +77,8 @@ reporting, and scripting with exit codes.
                                 matched file names + matches grouped per file (needs -app-id, -grep)
 -max-warnings N                 default 100
 -region string                  AWS region override
+-profile string                 named profile from ~/.aws/config and ~/.aws/credentials;
+                                overrides $AWS_PROFILE (default: standard credential chain)
 -progress duration              status line to stderr every interval, e.g. 2s (0 = off)
 -verbose                        log listing pages and per-object scan starts (stderr)
 -color auto|always|never        colorize results (default auto: only on a terminal)
@@ -529,6 +531,44 @@ because listing cost is proportional to the total key count. The
 bucket's region is auto-detected (here `ap-southeast-4`) — no `-region`
 needed even when your profile defaults elsewhere.
 
+#### Pick credentials with a named profile
+
+```
+s3logscan -profile prod-emr -cluster-name hbase-prod -grep ERROR
+```
+
+`-profile` names a section of `~/.aws/config` and `~/.aws/credentials`
+and is resolved by the AWS SDK itself, so static keys, `credential_process`,
+`role_arn` chains, and SSO profiles all work. It takes precedence over
+`AWS_PROFILE`; without it, credentials resolve through the standard
+chain unchanged, so existing invocations and instance/task roles are
+unaffected.
+
+For an SSO profile, log in first — the profile alone is not a
+credential:
+
+```
+aws sso login --profile prod-emr
+s3logscan -profile prod-emr -cluster-name hbase-prod -grep ERROR
+```
+
+`-profile` and `-region` compose, and `-region` wins over the profile's
+own region. That matters for the EMR lookup behind `-cluster-name` /
+`-cluster-id`, which is regional and is *not* auto-detected: a cluster
+outside the profile's default region needs `-region`.
+
+```
+s3logscan -profile prod-emr -region ap-southeast-2 \
+  -cluster-name hbase-prod -grep ERROR
+```
+
+Bucket regions stay auto-detected either way. A profile name that does
+not exist in the shared config fails before any scan work, exit 2:
+
+```
+s3logscan: loading AWS configuration: failed to get shared config profile, typo-emr
+```
+
 #### Requester-pays and cross-account safety
 
 ```
@@ -550,6 +590,7 @@ the application ID varies, put the constants in
 
 ```yaml
 # ~/.config/s3logscan/config.yaml
+profile: prod-emr
 cluster-name: hbase-prod
 i: true
 progress: 2s
@@ -689,7 +730,10 @@ budget — worker count alone bounds none of the ones that matter:
 ## AWS setup
 
 Credentials resolve through the standard chain (environment variables,
-`AWS_PROFILE`, instance/task roles). Least-privilege IAM policy:
+`AWS_PROFILE`, instance/task roles). `-profile NAME` selects a named
+profile explicitly and takes precedence over `AWS_PROFILE` — see
+[Pick credentials with a named profile](#pick-credentials-with-a-named-profile).
+Least-privilege IAM policy:
 
 ```json
 {

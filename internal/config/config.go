@@ -72,6 +72,7 @@ type Options struct {
 	MDReport            bool
 	MaxWarnings         int
 	Region              string
+	Profile             string
 	Progress            time.Duration
 	Verbose             bool
 	Color               string
@@ -125,6 +126,10 @@ Examples:
   Only objects modified on one UTC day (-after inclusive, -before exclusive):
     s3logscan -bucket b -prefix logs/ -after 2026-07-20 -before 2026-07-21 -grep ERROR
 
+  Pick the AWS credentials with a named profile (beats $AWS_PROFILE;
+  for an SSO profile, "aws sso login --profile prod-emr" first):
+    s3logscan -profile prod-emr -cluster-name hbase-prod -grep ERROR
+
 Config file:
   Standing defaults are read from ~/.config/s3logscan/config.yaml (or
   .yml; override the path with -config FILE). YAML: keys are the flag
@@ -132,6 +137,7 @@ Config file:
   "patterns" mapping defines the named categories -category picks
   from — each name a regex or a list of regexes that OR-combine
   (quote a regex if it starts with a YAML-special character). Example:
+      profile: prod-emr
       cluster-name: hbase-prod
       i: true
       progress: 2s
@@ -198,6 +204,7 @@ func NewFlagSet(name string, out io.Writer) (*flag.FlagSet, *Options) {
 	fs.BoolVar(&o.MDReport, "md", false, "write a Markdown report to ~/logscan/<yyyy-mm-dd>/<app-id>.md: matched file names, matches grouped per file, and the run summary (requires -app-id and -grep)")
 	fs.IntVar(&o.MaxWarnings, "max-warnings", 100, "stderr warning cap (0 = unlimited)")
 	fs.StringVar(&o.Region, "region", "", "AWS region override")
+	fs.StringVar(&o.Profile, "profile", "", "named profile from ~/.aws/config and ~/.aws/credentials; overrides $AWS_PROFILE (default: the standard credential chain)")
 	fs.DurationVar(&o.Progress, "progress", 0, "print a status line to stderr every interval, e.g. 2s (0 = off)")
 	fs.BoolVar(&o.Verbose, "verbose", false, "log each listing page and each object as scanning starts (stderr)")
 	fs.StringVar(&o.Color, "color", "auto", `colorize results: "auto" (only when stdout is a terminal), "always", or "never"`)
@@ -305,6 +312,14 @@ func (o *Options) Build() (*scan.Config, error) {
 	}
 	if o.Color != "auto" && o.Color != "always" && o.Color != "never" {
 		return nil, fmt.Errorf(`-color must be "auto", "always", or "never", got %q`, o.Color)
+	}
+	// A profile name is matched literally against the shared config
+	// file's section names, so surrounding whitespace never resolves.
+	// Rejecting it here turns a silent "profile not found" — which on
+	// a whitespace-only value would read as if no profile were given
+	// at all — into a usage error that names the value (M-03).
+	if o.Profile != strings.TrimSpace(o.Profile) {
+		return nil, fmt.Errorf("-profile must not have leading or trailing whitespace, got %q", o.Profile)
 	}
 
 	cfg := &scan.Config{

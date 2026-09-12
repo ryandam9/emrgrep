@@ -144,11 +144,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	var loadOpts []func(*awsconfig.LoadOptions) error
-	if opts.Region != "" {
-		loadOpts = append(loadOpts, awsconfig.WithRegion(opts.Region))
-	}
-	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, loadOpts...)
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsLoadOptions(opts)...)
 	if err != nil {
 		fmt.Fprintf(stderr, "s3logscan: loading AWS configuration: %v\n", err)
 		return 2
@@ -380,6 +376,27 @@ func newS3Client(cfg aws.Config) *s3.Client {
 	return s3.NewFromConfig(cfg, func(o *s3.Options) {
 		o.ResponseChecksumValidation = aws.ResponseChecksumValidationWhenRequired
 	})
+}
+
+// awsLoadOptions turns the credential/region flags into SDK load
+// options. Anything not named by a flag is left to the default chain,
+// so environment variables, $AWS_PROFILE, and instance/task roles keep
+// working untouched.
+//
+// -profile names a section of ~/.aws/config and ~/.aws/credentials and
+// is resolved by the SDK, which is what makes SSO, credential_process,
+// and role_arn profiles work without any code here. It takes
+// precedence over $AWS_PROFILE. -region is an explicit override and
+// outranks the profile's own region, so the two flags compose.
+func awsLoadOptions(opts *config.Options) []func(*awsconfig.LoadOptions) error {
+	var loadOpts []func(*awsconfig.LoadOptions) error
+	if opts.Region != "" {
+		loadOpts = append(loadOpts, awsconfig.WithRegion(opts.Region))
+	}
+	if opts.Profile != "" {
+		loadOpts = append(loadOpts, awsconfig.WithSharedConfigProfile(opts.Profile))
+	}
+	return loadOpts
 }
 
 // resolveBucketRegion discovers which region a bucket lives in.

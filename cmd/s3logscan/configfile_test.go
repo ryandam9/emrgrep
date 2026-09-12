@@ -171,3 +171,25 @@ func TestConfigFileCatSoftDefault(t *testing.T) {
 		t.Fatalf("file-provided cat must yield to a pattern: exit %d stderr %q", code, stderr.String())
 	}
 }
+
+// "profile" is an ordinary flag key, so it also works as a standing
+// default in the config file — and a padded value there fails with
+// -profile's own validation error rather than silently resolving to no
+// profile at all.
+func TestConfigFileProfile(t *testing.T) {
+	isolateHome(t)
+	p := writeTempConfig(t, "profile: prod-emr\nbucket: b\nprefix: logs/\nworkers: 0\n")
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"-config", p}, &stdout, &stderr)
+	if code != 2 || !strings.Contains(stderr.String(), "-workers") {
+		t.Fatalf("a valid file profile must parse and reach ordinary validation: exit %d stderr %q", code, stderr.String())
+	}
+
+	p = writeTempConfig(t, "profile: ' prod-emr'\nbucket: b\nprefix: logs/\n")
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{"-config", p}, &stdout, &stderr)
+	if code != 2 || !strings.Contains(stderr.String(), "-profile must not have leading or trailing whitespace") {
+		t.Fatalf("exit %d stderr %q", code, stderr.String())
+	}
+}
