@@ -36,6 +36,8 @@ func TestHelpExitsZero(t *testing.T) {
 			"Examples:",
 			"-cluster-name hbase-prod",
 			"-discover-apps",
+			"-profile",
+			"-profile prod-emr",
 			"Exit codes:",
 			"130 interrupted",
 		} {

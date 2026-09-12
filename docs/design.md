@@ -268,7 +268,7 @@ Validation (M-03) is fail-fast with exit 2: worker/window/size ranges checked, `
 
 ## 12. AWS Integration (H-05)
 
-Required IAM: `s3:ListBucket` on the bucket (prefix-conditioned where policy allows) and `s3:GetObject` on the log prefix; `kms:Decrypt` on the bucket key when SSE-KMS is in use. A least-privilege policy example ships in the README. Credentials resolve through the standard chain (environment, `AWS_PROFILE`, instance/task roles); an explicit `-role-arn` assume-role flow is deferred. `-expected-bucket-owner` guards against cross-account bucket confusion; `-request-payer requester` supports requester-pays buckets. Archive storage classes are handled at listing time (§5.1).
+Required IAM: `s3:ListBucket` on the bucket (prefix-conditioned where policy allows) and `s3:GetObject` on the log prefix; `kms:Decrypt` on the bucket key when SSE-KMS is in use. A least-privilege policy example ships in the README. Credentials resolve through the standard chain (environment, `AWS_PROFILE`, instance/task roles); `-profile` selects a named shared-config profile via `WithSharedConfigProfile`, taking precedence over `AWS_PROFILE` and leaving the chain otherwise untouched, so SSO, `credential_process`, and `role_arn` profiles are the SDK's job; a direct `-role-arn` assume-role flow remains deferred. `-expected-bucket-owner` guards against cross-account bucket confusion; `-request-payer requester` supports requester-pays buckets. Archive storage classes are handled at listing time (§5.1).
 
 ## 13. Deferred Work (staged, per review §12)
 

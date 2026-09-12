@@ -60,6 +60,11 @@ func TestValidationFailFast(t *testing.T) {
 		{"app id without cluster or prefix", []string{"-bucket", "b", "-allow-whole-bucket-scan", "-app-id", "application_1700000000000_0042"}, "-app-id needs the cluster's log directory"},
 		{"md without app id", []string{"-bucket", "b", "-prefix", "p", "-grep", "x", "-md"}, "-md requires -app-id"},
 		{"md without grep", []string{"-cluster-name", "hbase", "-app-id", "application_1_2", "-md"}, "-md requires -grep"},
+		// A profile name is matched literally against the shared
+		// config's section names, so padded values never resolve.
+		{"padded profile", []string{"-bucket", "b", "-prefix", "p", "-profile", " prod-emr"}, "-profile must not have leading or trailing whitespace"},
+		{"trailing-space profile", []string{"-bucket", "b", "-prefix", "p", "-profile", "prod-emr "}, "-profile must not have leading or trailing whitespace"},
+		{"whitespace-only profile", []string{"-bucket", "b", "-prefix", "p", "-profile", "   "}, "-profile must not have leading or trailing whitespace"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -115,6 +120,38 @@ func TestValidConfigs(t *testing.T) {
 	}
 	if !cfg.CollectMatchedKeys {
 		t.Fatal("-md must set CollectMatchedKeys")
+	}
+}
+
+// -profile is independent of every other flag: it selects credentials
+// and places no constraint on the scan, and an omitted -profile leaves
+// the standard credential chain in play.
+func TestProfileFlag(t *testing.T) {
+	o, _ := parse(t, "-bucket", "b", "-prefix", "logs/", "-grep", "x", "-profile", "prod-emr")
+	if _, err := o.Build(); err != nil {
+		t.Fatalf("-profile with a valid scan: %v", err)
+	}
+	if o.Profile != "prod-emr" {
+		t.Errorf("Profile = %q, want prod-emr", o.Profile)
+	}
+	// Profile names in the wild carry dots, dashes and underscores.
+	for _, name := range []string{"prod-emr", "my.profile", "acct_123", "default"} {
+		if err := build(t, "-bucket", "b", "-prefix", "p", "-profile", name); err != nil {
+			t.Errorf("-profile %q rejected: %v", name, err)
+		}
+	}
+	// -profile and -region compose: both reach the SDK loader.
+	o, _ = parse(t, "-bucket", "b", "-prefix", "p", "-profile", "prod-emr", "-region", "ap-southeast-2")
+	if err := func() error { _, err := o.Build(); return err }(); err != nil {
+		t.Fatalf("-profile with -region: %v", err)
+	}
+	if o.Profile != "prod-emr" || o.Region != "ap-southeast-2" {
+		t.Errorf("got profile %q region %q", o.Profile, o.Region)
+	}
+	// Default: no profile, so the credential chain is untouched.
+	o, _ = parse(t, "-bucket", "b", "-prefix", "p")
+	if o.Profile != "" {
+		t.Errorf("default Profile = %q, want empty", o.Profile)
 	}
 }
 
