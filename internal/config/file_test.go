@@ -189,7 +189,7 @@ func TestDefaultConfigPathYAML(t *testing.T) {
 	if got := DefaultConfigPath(); got != "" {
 		t.Fatalf("empty home: got %q", got)
 	}
-	dir := filepath.Join(home, ".config", "s3logscan")
+	dir := filepath.Join(home, ".config", "emrgrep")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}

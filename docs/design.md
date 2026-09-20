@@ -1,4 +1,4 @@
-# Design Document: `s3logscan`
+# Design Document: `emrgrep`
 
 **A resource-budgeted concurrent scanner for EMR/YARN logs stored in S3**
 

@@ -10,7 +10,7 @@ import (
 
 // isolateHome points $HOME (and the Windows equivalent) at an empty
 // temp dir so run() tests never read the developer's real
-// ~/.config/s3logscan/config — standing defaults there (cluster-name,
+// ~/.config/emrgrep/config — standing defaults there (cluster-name,
 // md = true, ...) would change validation errors and fail assertions
 // that pass everywhere else.
 func isolateHome(t *testing.T) {
@@ -75,12 +75,12 @@ func TestVersionExitsZero(t *testing.T) {
 	if code := run([]string{"-version"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d want 0", code)
 	}
-	if !strings.Contains(stdout.String(), "s3logscan") {
+	if !strings.Contains(stdout.String(), "emrgrep") {
 		t.Fatalf("stdout: %q", stdout.String())
 	}
 }
 
-// The default config path (~/.config/s3logscan/config.yaml) is honored,
+// The default config path (~/.config/emrgrep/config.yaml) is honored,
 // proven against an isolated home rather than the developer's real
 // one: the file's bad workers value reaches validation.
 func TestDefaultConfigReadFromHome(t *testing.T) {
@@ -89,7 +89,7 @@ func TestDefaultConfigReadFromHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Join(home, ".config", "s3logscan")
+	dir := filepath.Join(home, ".config", "emrgrep")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}

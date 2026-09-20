@@ -8,7 +8,7 @@ import (
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 
-	"github.com/ryandam9/s3-log-scan/internal/config"
+	"github.com/ryandam9/emrgrep/internal/config"
 )
 
 // sharedConfig writes an isolated ~/.aws/{config,credentials} pair with

@@ -191,7 +191,7 @@ func (s *objectScan) scanGzip(body io.Reader) error {
 func (s *objectScan) scanZip(body io.Reader) error {
 	// The object streams to a temporary file, never RAM (§6.3). The
 	// file is removed on every path, including cancellation.
-	tmp, err := os.CreateTemp(s.opts.TempDir, "s3logscan-zip-*")
+	tmp, err := os.CreateTemp(s.opts.TempDir, "emrgrep-zip-*")
 	if err != nil {
 		return fmt.Errorf("zip temp file: %w", err)
 	}

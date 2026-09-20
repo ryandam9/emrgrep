@@ -29,7 +29,7 @@ func NewWarner(w io.Writer, max int, counters *Counters) *Warner {
 func (wr *Warner) Logf(format string, args ...interface{}) {
 	wr.mu.Lock()
 	defer wr.mu.Unlock()
-	fmt.Fprintf(wr.w, "s3logscan: "+format+"\n", args...)
+	fmt.Fprintf(wr.w, "emrgrep: "+format+"\n", args...)
 }
 
 // Warnf emits one warning, subject to the cap.
@@ -41,7 +41,7 @@ func (wr *Warner) Warnf(format string, args ...interface{}) {
 		return
 	}
 	wr.emitted++
-	fmt.Fprintf(wr.w, "s3logscan: warning: "+format+"\n", args...)
+	fmt.Fprintf(wr.w, "emrgrep: warning: "+format+"\n", args...)
 }
 
 // Flush prints the suppression trailer if any warnings were dropped.
@@ -49,6 +49,6 @@ func (wr *Warner) Flush() {
 	wr.mu.Lock()
 	defer wr.mu.Unlock()
 	if n := wr.counters.WarningsSuppressed.Load(); n > 0 {
-		fmt.Fprintf(wr.w, "s3logscan: %d further warnings were suppressed by -max-warnings (all causes are still counted in the summary)\n", n)
+		fmt.Fprintf(wr.w, "emrgrep: %d further warnings were suppressed by -max-warnings (all causes are still counted in the summary)\n", n)
 	}
 }

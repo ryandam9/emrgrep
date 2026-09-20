@@ -1,4 +1,4 @@
-// Package config parses and validates the s3logscan command line.
+// Package config parses and validates the emrgrep command line.
 // Validation is fail-fast (M-03): every violation is reported with
 // exit status 2 before any AWS call is made.
 package config
@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ryandam9/s3-log-scan/internal/scan"
+	"github.com/ryandam9/emrgrep/internal/scan"
 )
 
 // appIDFormat validates -app-id: a complete YARN application ID and
@@ -85,53 +85,53 @@ type Options struct {
 const usageExamples = `
 Examples:
   Grep a prefix for a pattern:
-    s3logscan -bucket my-emr-logs -prefix logs/j-1ABC/ -grep 'ERROR|Exception'
+    emrgrep -bucket my-emr-logs -prefix logs/j-1ABC/ -grep 'ERROR|Exception'
 
   Scan an EMR cluster by name (bucket and prefix come from the
   cluster's S3 log destination; no -bucket/-prefix needed):
-    s3logscan -cluster-name hbase-prod -grep ERROR
+    emrgrep -cluster-name hbase-prod -grep ERROR
 
   One cluster, one application (only .../containers/<app-id>/ is
   listed and downloaded — no key search across the cluster's logs):
-    s3logscan -cluster-name hbase-prod -app-id application_1700000000000_0042 -grep ERROR
+    emrgrep -cluster-name hbase-prod -app-id application_1700000000000_0042 -grep ERROR
 
   Same scan, also saved as a Markdown report (matched file names, then
   matches grouped per file) under ~/logscan/<yyyy-mm-dd>/:
-    s3logscan -cluster-name hbase-prod -app-id application_1700000000000_0042 -grep ERROR -md
+    emrgrep -cluster-name hbase-prod -app-id application_1700000000000_0042 -grep ERROR -md
 
   Patterns you use often can be named in the config file's patterns
   mapping and picked by name — no regex typing:
-    s3logscan -app-id application_1700000000000_0042 -category spark
+    emrgrep -app-id application_1700000000000_0042 -category spark
 
   No pattern at all: list the application's files (the default), print
   the entire logs with -cat, or store them locally with -download
   (files land under ~/logscan/<yyyy-mm-dd>/<app-id>/, as-is):
-    s3logscan -app-id application_1700000000000_0042
-    s3logscan -app-id application_1700000000000_0042 -cat
-    s3logscan -app-id application_1700000000000_0042 -download
+    emrgrep -app-id application_1700000000000_0042
+    emrgrep -app-id application_1700000000000_0042 -cat
+    emrgrep -app-id application_1700000000000_0042 -download
 
   Discover which application logged an error (step logs first):
-    s3logscan -bucket my-emr-logs -prefix logs/j-1ABC/ \
+    emrgrep -bucket my-emr-logs -prefix logs/j-1ABC/ \
         -grep 'Table or view not found' -F -l -discover-apps -smallest-first
 
   List matching keys only, downloading nothing (omit -grep):
-    s3logscan -bucket my-emr-logs -prefix logs/j-1ABC/steps/
+    emrgrep -bucket my-emr-logs -prefix logs/j-1ABC/steps/
 
   Readable output for deep hierarchies, with live progress:
-    s3logscan -bucket b -allow-whole-bucket-scan -grep kyneton -i -group -progress 2s
+    emrgrep -bucket b -allow-whole-bucket-scan -grep kyneton -i -group -progress 2s
 
   Show 20 example matches, then stop downloading:
-    s3logscan -bucket b -prefix logs/ -grep ERROR -max-total-matches 20
+    emrgrep -bucket b -prefix logs/ -grep ERROR -max-total-matches 20
 
   Only objects modified on one UTC day (-after inclusive, -before exclusive):
-    s3logscan -bucket b -prefix logs/ -after 2026-07-20 -before 2026-07-21 -grep ERROR
+    emrgrep -bucket b -prefix logs/ -after 2026-07-20 -before 2026-07-21 -grep ERROR
 
   Pick the AWS credentials with a named profile (beats $AWS_PROFILE;
   for an SSO profile, "aws sso login --profile prod-emr" first):
-    s3logscan -profile prod-emr -cluster-name hbase-prod -grep ERROR
+    emrgrep -profile prod-emr -cluster-name hbase-prod -grep ERROR
 
 Config file:
-  Standing defaults are read from ~/.config/s3logscan/config.yaml (or
+  Standing defaults are read from ~/.config/emrgrep/config.yaml (or
   .yml; override the path with -config FILE). YAML: keys are the flag
   names; any flag given on the command line takes priority. The
   "patterns" mapping defines the named categories -category picks
@@ -147,13 +147,13 @@ Config file:
           - Caused by
         oom: OutOfMemoryError|exit code 137
   With that in place, a scan is just:
-      s3logscan -app-id application_..._0042 -category spark
+      emrgrep -app-id application_..._0042 -category spark
 
 Exit codes:
   0 matched; 1 no matches; 2 usage/credential/listing failure;
   3 object errors, partial scans, or -overall-timeout; 130 interrupted.
 
-Full documentation: https://github.com/ryandam9/s3-log-scan
+Full documentation: https://github.com/ryandam9/emrgrep
 `
 
 // NewFlagSet binds all flags (§11) onto a fresh FlagSet.
@@ -161,7 +161,7 @@ func NewFlagSet(name string, out io.Writer) (*flag.FlagSet, *Options) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(out)
 	fs.Usage = func() {
-		fmt.Fprintf(out, "s3logscan — a resource-budgeted concurrent scanner for EMR/YARN logs in S3\n\n")
+		fmt.Fprintf(out, "emrgrep — a resource-budgeted concurrent scanner for EMR/YARN logs in S3\n\n")
 		fmt.Fprintf(out, "Usage: %s [flags]\n\nFlags:\n", name)
 		fs.PrintDefaults()
 		fmt.Fprint(out, usageExamples)
@@ -209,7 +209,7 @@ func NewFlagSet(name string, out io.Writer) (*flag.FlagSet, *Options) {
 	fs.BoolVar(&o.Verbose, "verbose", false, "log each listing page and each object as scanning starts (stderr)")
 	fs.StringVar(&o.Color, "color", "auto", `colorize results: "auto" (only when stdout is a terminal), "always", or "never"`)
 	fs.BoolVar(&o.Group, "group", false, "print each object key once as a heading with its matches indented below (default: on when stdout is a terminal; -group=false forces flat lines)")
-	fs.StringVar(&o.ConfigFile, "config", "", "YAML config file with standing defaults (default: ~/.config/s3logscan/config.yaml or .yml if present); command-line flags take priority")
+	fs.StringVar(&o.ConfigFile, "config", "", "YAML config file with standing defaults (default: ~/.config/emrgrep/config.yaml or .yml if present); command-line flags take priority")
 	return fs, o
 }
 

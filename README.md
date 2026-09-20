@@ -1,8 +1,8 @@
-# s3logscan
+# emrgrep
 
 A resource-budgeted concurrent scanner for EMR/YARN logs stored in S3.
 
-`s3logscan` scans an S3 prefix and reports object keys and matching content
+`emrgrep` scans an S3 prefix and reports object keys and matching content
 lines, grep-style. It rejects as much work as possible before any download
 using listing metadata, streams `.gz`/`.bz2`/plain objects, handles `.zip`
 under explicit disk and expansion budgets, and reports the YARN application
@@ -12,19 +12,19 @@ logs). See [docs/design.md](docs/design.md) for the full design.
 ## Install
 
 ```
-go install github.com/ryandam9/s3-log-scan/cmd/s3logscan@latest
+go install github.com/ryandam9/emrgrep/cmd/emrgrep@latest
 ```
 
 or build from a checkout:
 
 ```
-go build ./cmd/s3logscan
+go build ./cmd/emrgrep
 ```
 
 ## Usage
 
 ```
-s3logscan -bucket <bucket> -prefix <prefix> -grep <pattern> [flags]
+emrgrep -bucket <bucket> -prefix <prefix> -grep <pattern> [flags]
 ```
 
 Grep-style matches go to stdout; diagnostics, progress, and the final
@@ -82,7 +82,7 @@ reporting, and scripting with exit codes.
 -progress duration              status line to stderr every interval, e.g. 2s (0 = off)
 -verbose                        log listing pages and per-object scan starts (stderr)
 -color auto|always|never        colorize results (default auto: only on a terminal)
--config file                    YAML defaults file (default: ~/.config/s3logscan/
+-config file                    YAML defaults file (default: ~/.config/emrgrep/
                                 config.yaml or .yml if present); CLI wins
 -group                          key-as-heading output (default: on when stdout is a
                                 terminal; -group=false forces classic flat lines)
@@ -98,7 +98,7 @@ Each example shows the command, what it prints, and why.
 #### Grep a prefix for a pattern
 
 ```
-s3logscan -bucket my-emr-logs -prefix logs/j-1ABC2DEF3GHI4/ -grep 'ERROR|Exception'
+emrgrep -bucket my-emr-logs -prefix logs/j-1ABC2DEF3GHI4/ -grep 'ERROR|Exception'
 ```
 
 Matches print to stdout in grep style — key, line number, matched line —
@@ -115,7 +115,7 @@ summary on stderr:
 
 ```
 ---
-s3logscan: completed in 42.318s
+emrgrep: completed in 42.318s
   listed 18211, survived filters 18195
   filtered out: 16 folder markers
   scanned to EOF 18195, stopped early by request 0, partially scanned 0
@@ -128,7 +128,7 @@ Exit code 0: matches found, nothing skipped or failed.
 #### Scope to a known application
 
 ```
-s3logscan -bucket my-emr-logs -prefix logs/j-1ABC2DEF3GHI4/ \
+emrgrep -bucket my-emr-logs -prefix logs/j-1ABC2DEF3GHI4/ \
   -app-id application_1700000000000_0042 -grep 'ERROR' -i
 ```
 
@@ -151,7 +151,7 @@ the config file's `patterns` mapping — each name a regex or a list of
 regexes that OR-combine — and select by name with `-category`:
 
 ```yaml
-# ~/.config/s3logscan/config.yaml
+# ~/.config/emrgrep/config.yaml
 cluster-name: hbase-prod
 patterns:
   spark:
@@ -162,7 +162,7 @@ patterns:
 ```
 
 ```
-s3logscan -app-id application_1700000000000_0042 -category spark
+emrgrep -app-id application_1700000000000_0042 -category spark
 ```
 
 An unknown category is a fail-fast error that lists what the file
@@ -182,8 +182,8 @@ logs line by line, with the usual key/line prefixes, grouping, and
 budgets:
 
 ```
-s3logscan -app-id application_1700000000000_0042        # file names only
-s3logscan -app-id application_1700000000000_0042 -cat   # full log content
+emrgrep -app-id application_1700000000000_0042        # file names only
+emrgrep -app-id application_1700000000000_0042 -cat   # full log content
 ```
 
 `-cat` works as a config standing default too (`cat: true`): it
@@ -198,12 +198,12 @@ disk — no pattern, no reading in the terminal — `-download` stores
 every object of the application locally:
 
 ```
-s3logscan -app-id application_1700000000000_0042 -download
+emrgrep -app-id application_1700000000000_0042 -download
 ```
 
 ```
-s3logscan: scanning s3://my-emr-logs/logs/j-1ABC/containers/application_1700000000000_0042/
-s3logscan: downloading to ~/logscan/2026-08-05/application_1700000000000_0042
+emrgrep: scanning s3://my-emr-logs/logs/j-1ABC/containers/application_1700000000000_0042/
+emrgrep: downloading to ~/logscan/2026-08-05/application_1700000000000_0042
 s3://…/container_01_000001/stderr.gz -> ~/logscan/2026-08-05/application_1700000000000_0042/container_01_000001/stderr.gz
 …
 ```
@@ -224,7 +224,7 @@ runs.
 #### Save the run as a Markdown report
 
 ```
-s3logscan -cluster-name hbase-prod -app-id application_1700000000000_0042 -grep 'ERROR' -md
+emrgrep -cluster-name hbase-prod -app-id application_1700000000000_0042 -grep 'ERROR' -md
 ```
 
 `-md` writes `~/logscan/<yyyy-mm-dd>/<app-id>.md` when the run ends
@@ -235,7 +235,7 @@ lines beneath it, regardless of whether the screen used grouped or flat
 format, followed by the run summary:
 
 ````markdown
-# s3logscan — application_1700000000000_0042
+# emrgrep — application_1700000000000_0042
 
 - **Generated**: 2026-08-04 20:30:00 AEST
 - **Pattern**: `ERROR`
@@ -260,9 +260,9 @@ s3://my-emr-logs/logs/j-1ABC/containers/application_1700000000000_0042/container
 ## Run summary
 
 ```sh
-s3logscan: scanning s3://my-emr-logs/logs/j-1ABC/containers/application_1700000000000_0042/
+emrgrep: scanning s3://my-emr-logs/logs/j-1ABC/containers/application_1700000000000_0042/
 ---
-s3logscan: completed in 4.2s
+emrgrep: completed in 4.2s
   ...
 ```
 ````
@@ -277,7 +277,7 @@ serves list-only and cluster-wide scans.
 #### Discover which application produced an error
 
 ```
-s3logscan -bucket my-emr-logs -prefix logs/j-1ABC2DEF3GHI4/ \
+emrgrep -bucket my-emr-logs -prefix logs/j-1ABC2DEF3GHI4/ \
   -grep 'Table or view not found' -F -l -discover-apps -smallest-first
 ```
 
@@ -306,7 +306,7 @@ and the summary turns the discovery into your next query:
 #### Scan an EMR cluster by name — no bucket or prefix needed
 
 ```
-s3logscan -cluster-name hbase-prod -app-id application_1700000000000_0042 -grep 'ERROR'
+emrgrep -cluster-name hbase-prod -app-id application_1700000000000_0042 -grep 'ERROR'
 ```
 
 `-cluster-name` asks EMR for the RUNNING/WAITING cluster with that
@@ -319,7 +319,7 @@ nothing but that application's logs. The chosen scope is echoed to
 stderr:
 
 ```
-s3logscan: scanning s3://my-emr-logs/logs/j-1ABC2DEF3GHI4/containers/application_1700000000000_0042/
+emrgrep: scanning s3://my-emr-logs/logs/j-1ABC2DEF3GHI4/containers/application_1700000000000_0042/
 ```
 
 Details:
@@ -345,7 +345,7 @@ Details:
 #### List objects without downloading anything
 
 ```
-s3logscan -bucket my-emr-logs -prefix logs/j-1ABC2DEF3GHI4/steps/
+emrgrep -bucket my-emr-logs -prefix logs/j-1ABC2DEF3GHI4/steps/
 ```
 
 Omitting `-grep` is list-only mode: survivors of the metadata filters
@@ -357,7 +357,7 @@ a content scan would download.
 #### Restrict by time window
 
 ```
-s3logscan -bucket my-emr-logs -prefix logs/j-1ABC2DEF3GHI4/ \
+emrgrep -bucket my-emr-logs -prefix logs/j-1ABC2DEF3GHI4/ \
   -after 2026-07-20 -before 2026-07-21 -grep 'ERROR'
 ```
 
@@ -371,7 +371,7 @@ metadata, never downloaded.
 #### Restrict by extension
 
 ```
-s3logscan -bucket my-emr-logs -prefix logs/ -ext .gz,.log -grep 'OutOfMemoryError'
+emrgrep -bucket my-emr-logs -prefix logs/ -ext .gz,.log -grep 'OutOfMemoryError'
 ```
 
 Only keys ending in `.gz` or `.log` (case-insensitive) are fetched;
@@ -380,7 +380,7 @@ everything else counts under `extension filtered`.
 #### Cap the noise from repetitive logs
 
 ```
-s3logscan -bucket my-emr-logs -prefix logs/j-1ABC2DEF3GHI4/ \
+emrgrep -bucket my-emr-logs -prefix logs/j-1ABC2DEF3GHI4/ \
   -grep 'Connection refused' -max-matches 3
 ```
 
@@ -392,7 +392,7 @@ error, so the exit code stays 0.
 #### Stop the whole run after N matches
 
 ```
-s3logscan -bucket my-emr-logs -prefix logs/ -grep 'OutOfMemoryError' -max-total-matches 20
+emrgrep -bucket my-emr-logs -prefix logs/ -grep 'OutOfMemoryError' -max-total-matches 20
 ```
 
 Where `-max-matches` caps each object, `-max-total-matches` caps the
@@ -401,7 +401,7 @@ new objects are fetched, and in-flight objects wind down (counted as
 `stopped early by request`, never as partial). The summary says so:
 
 ```
-s3logscan: completed: -max-total-matches reached in 3.402s
+emrgrep: completed: -max-total-matches reached in 3.402s
 ```
 
 Exit code 0 — a satisfied query, not an interruption. With `-l`, the
@@ -420,7 +420,7 @@ single-line format for scripts; force either mode with `-group` /
 `-group=false`.
 
 ```
-s3logscan -bucket my-emr-logs -prefix logs/j-1ABC/ -grep 'ERROR'
+emrgrep -bucket my-emr-logs -prefix logs/j-1ABC/ -grep 'ERROR'
 ```
 
 ```
@@ -454,14 +454,14 @@ and nothing prints until a match, a warning, or the final summary.
 `-progress` makes the wait legible:
 
 ```
-s3logscan -bucket my-bucket -allow-whole-bucket-scan -grep kyneton -i -progress 2s
+emrgrep -bucket my-bucket -allow-whole-bucket-scan -grep kyneton -i -progress 2s
 ```
 
 A legend prints once before the first status line, so the columns are
 self-explanatory right in the terminal:
 
 ```
-s3logscan: progress columns:
+emrgrep: progress columns:
     00:00:00  time since the run started (hh:mm:ss)
     listing   S3 is still enumerating keys; changes to "listed" when done
     keys      objects the S3 listing has found so far
@@ -471,9 +471,9 @@ s3logscan: progress columns:
     match     matching objects / matching lines found so far
     dl        compressed data downloaded from S3 so far
     err       objects that failed (classified in the final summary)
-s3logscan: progress 00:00:10 listing  keys 42000     kept 3100      done 2905      queue 195     match 3/17         dl 1.2 GiB    err 0
-s3logscan: progress 00:00:12 listing  keys 51000     kept 3810      done 3644      queue 166     match 5/29         dl 1.5 GiB    err 0
-s3logscan: progress 00:00:14 listed   keys 58211     kept 4302      done 4302      queue 0       match 6/31         dl 1.7 GiB    err 0
+emrgrep: progress 00:00:10 listing  keys 42000     kept 3100      done 2905      queue 195     match 3/17         dl 1.2 GiB    err 0
+emrgrep: progress 00:00:12 listing  keys 51000     kept 3810      done 3644      queue 166     match 5/29         dl 1.5 GiB    err 0
+emrgrep: progress 00:00:14 listed   keys 58211     kept 4302      done 4302      queue 0       match 6/31         dl 1.7 GiB    err 0
 ```
 
 Columns are fixed-width, so successive lines align and moving numbers
@@ -481,8 +481,8 @@ are easy to eyeball. `-verbose` goes further and logs each listing
 page and each object as its scan starts:
 
 ```
-s3logscan: listed page of 1000 keys (23000 so far, 812 survived filters)
-s3logscan: scanning s3://my-bucket/notes/trip-log.txt (11.3 KiB)
+emrgrep: listed page of 1000 keys (23000 so far, 812 survived filters)
+emrgrep: scanning s3://my-bucket/notes/trip-log.txt (11.3 KiB)
 ```
 
 Both write to stderr only — stdout stays pipeable — and neither counts
@@ -491,7 +491,7 @@ against `-max-warnings`.
 #### Bound a scan in time
 
 ```
-s3logscan -bucket my-emr-logs -prefix logs/ -grep 'ERROR' \
+emrgrep -bucket my-emr-logs -prefix logs/ -grep 'ERROR' \
   -object-timeout 30s -overall-timeout 5m
 ```
 
@@ -501,7 +501,7 @@ the whole run at 5 minutes:
 
 ```
 ---
-s3logscan: stopped: -overall-timeout exceeded in 5m0.007s
+emrgrep: stopped: -overall-timeout exceeded in 5m0.007s
   ...
 ```
 
@@ -511,8 +511,8 @@ operator's Ctrl+C produces, so automation can tell them apart.
 #### Force or forbid color
 
 ```
-s3logscan ... -color always | less -R     # keep colors through a pager
-s3logscan ... -color never > matches.txt  # explicit, though auto already
+emrgrep ... -color always | less -R     # keep colors through a pager
+emrgrep ... -color never > matches.txt  # explicit, though auto already
                                           # disables color for redirects
 ```
 
@@ -523,7 +523,7 @@ uncolored format.
 #### Whole-bucket scans and cross-region buckets
 
 ```
-s3logscan -bucket mellow.pictures -allow-whole-bucket-scan -grep kyneton -i
+emrgrep -bucket mellow.pictures -allow-whole-bucket-scan -grep kyneton -i
 ```
 
 An empty prefix requires the explicit `-allow-whole-bucket-scan` flag,
@@ -534,7 +534,7 @@ needed even when your profile defaults elsewhere.
 #### Pick credentials with a named profile
 
 ```
-s3logscan -profile prod-emr -cluster-name hbase-prod -grep ERROR
+emrgrep -profile prod-emr -cluster-name hbase-prod -grep ERROR
 ```
 
 `-profile` names a section of `~/.aws/config` and `~/.aws/credentials`
@@ -549,7 +549,7 @@ credential:
 
 ```
 aws sso login --profile prod-emr
-s3logscan -profile prod-emr -cluster-name hbase-prod -grep ERROR
+emrgrep -profile prod-emr -cluster-name hbase-prod -grep ERROR
 ```
 
 `-profile` and `-region` compose, and `-region` wins over the profile's
@@ -558,7 +558,7 @@ own region. That matters for the EMR lookup behind `-cluster-name` /
 outside the profile's default region needs `-region`.
 
 ```
-s3logscan -profile prod-emr -region ap-southeast-2 \
+emrgrep -profile prod-emr -region ap-southeast-2 \
   -cluster-name hbase-prod -grep ERROR
 ```
 
@@ -566,13 +566,13 @@ Bucket regions stay auto-detected either way. A profile name that does
 not exist in the shared config fails before any scan work, exit 2:
 
 ```
-s3logscan: loading AWS configuration: failed to get shared config profile, typo-emr
+emrgrep: loading AWS configuration: failed to get shared config profile, typo-emr
 ```
 
 #### Requester-pays and cross-account safety
 
 ```
-s3logscan -bucket shared-logs -prefix team/ -grep 'ERROR' \
+emrgrep -bucket shared-logs -prefix team/ -grep 'ERROR' \
   -request-payer requester -expected-bucket-owner 111122223333
 ```
 
@@ -585,11 +585,11 @@ against bucket-name squatting across accounts.
 
 When the cluster, patterns, and preferences rarely change and only
 the application ID varies, put the constants in
-`~/.config/s3logscan/config.yaml` (or `.yml`, or any file named with
+`~/.config/emrgrep/config.yaml` (or `.yml`, or any file named with
 `-config`):
 
 ```yaml
-# ~/.config/s3logscan/config.yaml
+# ~/.config/emrgrep/config.yaml
 profile: prod-emr
 cluster-name: hbase-prod
 i: true
@@ -605,14 +605,14 @@ patterns:
 Then a scan is just the part that changes:
 
 ```
-s3logscan -app-id application_1700000000000_0042 -category spark
+emrgrep -app-id application_1700000000000_0042 -category spark
 ```
 
 Rules: YAML, with top-level keys named exactly as the CLI flags and a
 `patterns` mapping for the named categories (a regex, or a list of
 regexes that OR-combine; quote a regex if it starts with a
 YAML-special character like `*` or `[`). **Any flag given on the
-command line takes priority over the file** — `s3logscan -grep FATAL`
+command line takes priority over the file** — `emrgrep -grep FATAL`
 overrides the file for that run. Unknown keys and invalid values fail
 fast with the file and line number. `config` and `version` cannot be
 set from the file.
@@ -620,7 +620,7 @@ set from the file.
 #### Use exit codes in scripts
 
 ```sh
-s3logscan -bucket my-emr-logs -prefix logs/j-1ABC/ -grep 'ERROR' -F
+emrgrep -bucket my-emr-logs -prefix logs/j-1ABC/ -grep 'ERROR' -F
 case $? in
   0)   echo "errors found in logs" ;;
   1)   echo "clean: no matches" ;;

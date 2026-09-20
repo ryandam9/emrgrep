@@ -1,4 +1,4 @@
-module github.com/ryandam9/s3-log-scan
+module github.com/ryandam9/emrgrep
 
 go 1.24.7
 

@@ -78,7 +78,7 @@ func mdCodeBlock(content string) string {
 // summary.
 func writeMDReport(path, appID, pattern string, scopes, matchedKeys []string, matches []mdMatch, runLog string, now time.Time) error {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# s3logscan — %s\n\n", appID)
+	fmt.Fprintf(&b, "# emrgrep — %s\n\n", appID)
 	// Local time, zone spelled out: the report is read on the machine
 	// that produced it, and "when did I run this" should not require
 	// UTC arithmetic.

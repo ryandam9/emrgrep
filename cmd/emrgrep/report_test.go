@@ -32,7 +32,7 @@ func TestWriteMDReport(t *testing.T) {
 		{Key: key1, LineNo: 812, Text: "Caused by: something"},
 		{Key: key2, Entry: "inner.log", LineNo: 3, Text: "zip ERROR"},
 	}
-	runLog := "s3logscan: scanning s3://b/logs/j-1/containers/application_1_2/\n---\ns3logscan: completed in 1.0s\n"
+	runLog := "emrgrep: scanning s3://b/logs/j-1/containers/application_1_2/\n---\nemrgrep: completed in 1.0s\n"
 	// A non-UTC zone proves the timestamp renders in the local zone it
 	// was produced in (main passes time.Now()), not converted to UTC.
 	now := time.Date(2026, 8, 4, 20, 30, 0, 0, time.FixedZone("AEST", 10*3600))
@@ -45,7 +45,7 @@ func TestWriteMDReport(t *testing.T) {
 	}
 	got := string(data)
 	for _, want := range []string{
-		"# s3logscan — application_1_2",
+		"# emrgrep — application_1_2",
 		"- **Generated**: 2026-08-04 20:30:00 AEST",
 		"- **Pattern**: `ERROR`",
 		"- **Scanned**: `s3://b/logs/j-1/containers/application_1_2/`",
@@ -56,7 +56,7 @@ func TestWriteMDReport(t *testing.T) {
 		"### " + key1 + "\n\n```sh\n    44: line with ERROR text\n   812: Caused by: something\n```",
 		"### " + key2 + "\n\n```sh\n     7: another ERROR\ninner.log:3: zip ERROR\n```",
 		"## Run summary",
-		"s3logscan: completed in 1.0s",
+		"emrgrep: completed in 1.0s",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("report missing %q\n---\n%s", want, got)
@@ -72,7 +72,7 @@ func TestWriteMDReport(t *testing.T) {
 func TestWriteMDReportNoMatches(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "application_9_9.md")
 	err := writeMDReport(path, "application_9_9", "FATAL", []string{"s3://b/p/"}, nil, nil,
-		"s3logscan: scanning s3://b/p/\n", time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC))
+		"emrgrep: scanning s3://b/p/\n", time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}

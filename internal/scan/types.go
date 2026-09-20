@@ -1,4 +1,4 @@
-// Package scan implements the s3logscan engine: listing, filtering,
+// Package scan implements the emrgrep engine: listing, filtering,
 // scheduling, downloading, decompression, line matching, and reporting.
 package scan
 

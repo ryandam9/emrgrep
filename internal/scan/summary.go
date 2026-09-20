@@ -57,7 +57,7 @@ func PrintSummary(w io.Writer, r *RunResult, listOnly, color bool) {
 	case r.ListingErr != nil:
 		status = paint(sumRed, "failed while listing")
 	}
-	fmt.Fprintf(w, "s3logscan: %s in %s\n", status, r.Elapsed.Round(1e6))
+	fmt.Fprintf(w, "emrgrep: %s in %s\n", status, r.Elapsed.Round(1e6))
 
 	fmt.Fprintf(w, "  listed %s, survived filters %s\n",
 		num(sumCyan, c.Listed.Load()), num(sumCyan, c.Survived.Load()))

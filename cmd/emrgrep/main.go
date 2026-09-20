@@ -1,4 +1,4 @@
-// Command s3logscan is a resource-budgeted concurrent scanner for
+// Command emrgrep is a resource-budgeted concurrent scanner for
 // EMR/YARN logs stored in S3.
 package main
 
@@ -20,8 +20,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/emr"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
-	"github.com/ryandam9/s3-log-scan/internal/config"
-	"github.com/ryandam9/s3-log-scan/internal/scan"
+	"github.com/ryandam9/emrgrep/internal/config"
+	"github.com/ryandam9/emrgrep/internal/scan"
 )
 
 // Injected at build time via -ldflags (see Makefile).
@@ -38,7 +38,7 @@ func main() {
 // run is main without process-global state, so exit codes and the
 // -h/-version paths are testable (M-04).
 func run(args []string, stdout, stderr io.Writer) int {
-	fs, opts := config.NewFlagSet("s3logscan", stderr)
+	fs, opts := config.NewFlagSet("emrgrep", stderr)
 	showVersion := fs.Bool("version", false, "print version and exit")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -47,11 +47,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *showVersion {
-		fmt.Fprintf(stdout, "s3logscan %s (commit %s, built %s)\n", version, commit, date)
+		fmt.Fprintf(stdout, "emrgrep %s (commit %s, built %s)\n", version, commit, date)
 		return 0
 	}
 	// Config file: standing defaults (cluster name, patterns, -i, ...)
-	// read as YAML from -config or ~/.config/s3logscan/config.yaml,
+	// read as YAML from -config or ~/.config/emrgrep/config.yaml,
 	// applied only to flags NOT given on the command line — CLI always
 	// takes priority.
 	cliSet := map[string]bool{}
@@ -66,7 +66,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		var err error
 		fileSet, filePatterns, err = config.ApplyFile(fs, cfgFile, func(k string) bool { return cliSet[k] })
 		if err != nil {
-			fmt.Fprintf(stderr, "s3logscan: %v\n", err)
+			fmt.Fprintf(stderr, "emrgrep: %v\n", err)
 			return 2
 		}
 	}
@@ -79,23 +79,23 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if opts.Category != "" {
 		switch {
 		case cliSet["category"] && cliSet["grep"]:
-			fmt.Fprintf(stderr, "s3logscan: -category and -grep are mutually exclusive (the category resolves to a pattern)\n")
+			fmt.Fprintf(stderr, "emrgrep: -category and -grep are mutually exclusive (the category resolves to a pattern)\n")
 			return 2
 		case !cliSet["category"] && cliSet["grep"]:
 			opts.Category = "" // CLI -grep beats a file-provided category default
 		case !cliSet["category"] && fileSet["grep"]:
-			fmt.Fprintf(stderr, "s3logscan: the config file sets both grep and category; keep one standing default\n")
+			fmt.Fprintf(stderr, "emrgrep: the config file sets both grep and category; keep one standing default\n")
 			return 2
 		}
 	}
 	if opts.Category != "" {
 		if opts.FixedString {
-			fmt.Fprintf(stderr, "s3logscan: -F cannot be combined with -category (config-file patterns are always regular expressions)\n")
+			fmt.Fprintf(stderr, "emrgrep: -F cannot be combined with -category (config-file patterns are always regular expressions)\n")
 			return 2
 		}
 		pattern, err := config.ResolveCategory(opts.Category, filePatterns)
 		if err != nil {
-			fmt.Fprintf(stderr, "s3logscan: %v\n", err)
+			fmt.Fprintf(stderr, "emrgrep: %v\n", err)
 			return 2
 		}
 		opts.GrepPattern = pattern
@@ -131,7 +131,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	cfg, err := opts.Build()
 	if err != nil {
-		fmt.Fprintf(stderr, "s3logscan: %v\n", err)
+		fmt.Fprintf(stderr, "emrgrep: %v\n", err)
 		return 2
 	}
 	cfg.Scan.TempDir = os.TempDir()
@@ -146,7 +146,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsLoadOptions(opts)...)
 	if err != nil {
-		fmt.Fprintf(stderr, "s3logscan: loading AWS configuration: %v\n", err)
+		fmt.Fprintf(stderr, "emrgrep: loading AWS configuration: %v\n", err)
 		return 2
 	}
 	// Cluster scoping: -cluster-name resolves EVERY running/waiting
@@ -163,14 +163,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 			var err error
 			clusters, err = resolveClusters(ctx, emrClient, opts.ClusterName)
 			if err != nil {
-				fmt.Fprintf(stderr, "s3logscan: %v\n", err)
+				fmt.Fprintf(stderr, "emrgrep: %v\n", err)
 				return 2
 			}
 			if len(clusters) > 1 {
-				fmt.Fprintf(stderr, "s3logscan: %d running/waiting clusters named %q; scanning all of them:\n",
+				fmt.Fprintf(stderr, "emrgrep: %d running/waiting clusters named %q; scanning all of them:\n",
 					len(clusters), opts.ClusterName)
 				for _, m := range clusters {
-					fmt.Fprintf(stderr, "s3logscan:   %s\n", m)
+					fmt.Fprintf(stderr, "emrgrep:   %s\n", m)
 				}
 			}
 		}
@@ -212,10 +212,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 			err = writeMDReport(path, opts.AppID, patternDisplay, mdScopes, mdMatched, mdMatches, mdBuf.String(), now)
 		}
 		if err != nil {
-			fmt.Fprintf(stderr, "s3logscan: %v\n", err)
+			fmt.Fprintf(stderr, "emrgrep: %v\n", err)
 			return true
 		}
-		fmt.Fprintf(stderr, "s3logscan: report written to %s\n", path)
+		fmt.Fprintf(stderr, "emrgrep: report written to %s\n", path)
 		return false
 	}
 
@@ -227,10 +227,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		var err error
 		downloadDest, err = downloadDir(opts.AppID, time.Now())
 		if err != nil {
-			fmt.Fprintf(stderr, "s3logscan: %v\n", err)
+			fmt.Fprintf(stderr, "emrgrep: %v\n", err)
 			return 2
 		}
-		fmt.Fprintf(stderr, "s3logscan: downloading to %s\n", downloadDest)
+		fmt.Fprintf(stderr, "emrgrep: downloading to %s\n", downloadDest)
 	}
 
 	// One engine run per scope, sequentially. -max-total-matches is a
@@ -265,11 +265,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		// Echo the exact scope every LIST and GET will be confined to,
 		// so a run always shows where it is looking — including the
 		// containers/<app-id>/ narrowing when -app-id is in play.
-		fmt.Fprintf(stderr, "s3logscan: scanning s3://%s/%s\n", runCfg.Bucket, runCfg.Prefix)
+		fmt.Fprintf(stderr, "emrgrep: scanning s3://%s/%s\n", runCfg.Bucket, runCfg.Prefix)
 		if opts.MDReport {
 			scope := fmt.Sprintf("s3://%s/%s", runCfg.Bucket, runCfg.Prefix)
 			mdScopes = append(mdScopes, scope)
-			fmt.Fprintf(&mdBuf, "s3logscan: scanning %s\n", scope)
+			fmt.Fprintf(&mdBuf, "emrgrep: scanning %s\n", scope)
 			// Called from the writer goroutine; engine.Run returns only
 			// after the writer is closed, so reading mdMatches after
 			// each run is safe. Sanitization matches what was printed.
@@ -288,7 +288,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 		engine.Warner().Flush()
 		if result.ListingErr != nil {
-			fmt.Fprintf(stderr, "s3logscan: %v\n", result.ListingErr)
+			fmt.Fprintf(stderr, "emrgrep: %v\n", result.ListingErr)
 		}
 		scan.PrintSummary(stderr, result, runCfg.ListOnly, resolveColor(opts.Color, stderr))
 		if opts.MDReport {

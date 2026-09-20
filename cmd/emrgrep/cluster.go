@@ -99,7 +99,7 @@ func clusterScopes(ctx context.Context, client emrAPI, clusters []clusterMatch, 
 			var err error
 			b, p, err = clusterLogDestination(ctx, client, c.ID)
 			if err != nil {
-				fmt.Fprintf(warn, "s3logscan: %v; skipping cluster %s\n", err, c.ID)
+				fmt.Fprintf(warn, "emrgrep: %v; skipping cluster %s\n", err, c.ID)
 				failed = true
 				continue
 			}

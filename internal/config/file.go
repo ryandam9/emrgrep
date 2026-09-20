@@ -42,7 +42,7 @@ func ResolveCategory(name string, patterns map[string][]string) (string, error) 
 	return strings.Join(groups, "|"), nil
 }
 
-// DefaultConfigPath returns ~/.config/s3logscan/config.yaml (or .yml)
+// DefaultConfigPath returns ~/.config/emrgrep/config.yaml (or .yml)
 // if one exists, "" otherwise.
 func DefaultConfigPath() string {
 	home, err := os.UserHomeDir()
@@ -50,7 +50,7 @@ func DefaultConfigPath() string {
 		return ""
 	}
 	for _, name := range []string{"config.yaml", "config.yml"} {
-		p := home + "/.config/s3logscan/" + name
+		p := home + "/.config/emrgrep/" + name
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}
