@@ -35,7 +35,7 @@ func TestResolveColorHonorsNoColor(t *testing.T) {
 func TestBadColorValueExitsTwo(t *testing.T) {
 	isolateHome(t)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"-bucket", "b", "-prefix", "p", "-color", "sometimes"}, &stdout, &stderr); code != 2 {
+	if code := run(runArgs("-bucket", "b", "-prefix", "p", "-color", "sometimes"), &stdout, &stderr); code != 2 {
 		t.Fatalf("exit %d want 2", code)
 	}
 }
@@ -81,7 +81,7 @@ func TestGroupExplicitFalseAccepted(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	// Validation error on workers proves parsing got past the group
 	// resolution without a -group-related complaint.
-	code := run([]string{"-bucket", "b", "-prefix", "p", "-grep", "x", "-group=false", "-workers", "0"}, &stdout, &stderr)
+	code := run(runArgs("-bucket", "b", "-prefix", "p", "-grep", "x", "-group=false", "-workers", "0"), &stdout, &stderr)
 	if code != 2 || !strings.Contains(stderr.String(), "-workers") {
 		t.Fatalf("exit %d stderr %q", code, stderr.String())
 	}

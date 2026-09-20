@@ -24,7 +24,18 @@ go build ./cmd/emrgrep
 ## Usage
 
 ```
-emrgrep -bucket <bucket> -prefix <prefix> -grep <pattern> [flags]
+emrgrep -profile <profile> -bucket <bucket> -prefix <prefix> -grep <pattern> [flags]
+```
+
+`-profile` is required — it names the AWS profile that supplies both
+the credentials and the region (see
+[Name the profile](#name-the-profile-required)). Put it in the config
+file once and it never needs typing again, which is what the examples
+below assume:
+
+```yaml
+# ~/.config/emrgrep/config.yaml
+profile: prod-emr
 ```
 
 Grep-style matches go to stdout; diagnostics, progress, and the final
@@ -78,9 +89,11 @@ reporting, and scripting with exit codes.
 -md                             write a Markdown report to ~/logscan/<yyyy-mm-dd>/<app-id>.md:
                                 matched file names + matches grouped per file (needs -app-id, -grep)
 -max-warnings N                 default 100
--region string                  AWS region override
--profile string                 named profile from ~/.aws/config and ~/.aws/credentials;
-                                overrides $AWS_PROFILE (default: standard credential chain)
+-region string                  AWS region override; without it the region comes from
+                                the profile's section in ~/.aws/credentials or ~/.aws/config
+-profile string                 REQUIRED: named profile from ~/.aws/credentials and
+                                ~/.aws/config; supplies both the credentials and the
+                                region (may instead be set in the config file)
 -progress duration              status line to stderr every interval, e.g. 2s (0 = off)
 -verbose                        log listing pages and per-object scan starts (stderr)
 -color auto|always|never        colorize results (default auto: only on a terminal)
@@ -95,7 +108,9 @@ Use `-F` for fixed strings.
 
 ### Examples
 
-Each example shows the command, what it prints, and why.
+Each example shows the command, what it prints, and why. They omit
+`-profile` on the assumption that `profile:` is set in the config
+file; without it, add `-profile <name>` to every command.
 
 #### Grep a prefix for a pattern
 
@@ -546,31 +561,63 @@ because listing cost is proportional to the total key count. The
 bucket's region is auto-detected (here `ap-southeast-4`) — no `-region`
 needed even when your profile defaults elsewhere.
 
-#### Pick credentials with a named profile
+#### Name the profile (required)
 
 ```
 emrgrep -profile prod-emr -cluster-name hbase-prod -grep ERROR
 ```
 
-`-profile` names a section of `~/.aws/config` and `~/.aws/credentials`
-and is resolved by the AWS SDK itself, so static keys, `credential_process`,
-`role_arn` chains, and SSO profiles all work. It takes precedence over
-`AWS_PROFILE`; without it, credentials resolve through the standard
-chain unchanged, so existing invocations and instance/task roles are
-unaffected.
+**`-profile` is mandatory.** Every run states which account it reads
+from, rather than inheriting whichever one the environment happens to
+point at. Omitting it is a usage error, exit 2, before any AWS call:
 
-For an SSO profile, log in first — the profile alone is not a
-credential:
+```
+emrgrep: -profile is required: name the AWS profile to use, e.g. -profile prod-emr (or set "profile: prod-emr" in the config file)
+```
+
+A `profile:` key in the config file satisfies it, so in practice you
+type it once and never again — see [Config file](#config-file).
+`AWS_PROFILE` does **not** satisfy it; it is ambient, which is the
+thing the requirement exists to rule out. Instance and task roles are
+likewise no longer enough on their own: give the role a named profile
+in `~/.aws/config` and point `-profile` at it.
+
+`-profile` names a section of `~/.aws/credentials` and `~/.aws/config`
+and is resolved by the AWS SDK itself, so static keys, `credential_process`,
+`role_arn` chains, and SSO profiles all work. For an SSO profile, log
+in first — the profile alone is not a credential:
 
 ```
 aws sso login --profile prod-emr
 emrgrep -profile prod-emr -cluster-name hbase-prod -grep ERROR
 ```
 
+##### The profile also supplies the region
+
+The profile's `region =` line is read from **either** file. `region`
+in `~/.aws/credentials` works exactly like `region` in `~/.aws/config`
+— the SDK merges both files for the named profile — and when both
+declare one, the credentials file wins:
+
+```ini
+# ~/.aws/credentials — credentials and region together
+[prod-emr]
+aws_access_key_id = AKIA...
+aws_secret_access_key = ...
+region = ap-southeast-2
+```
+
+If the profile declares no region anywhere and `-region` is not given,
+the run stops before any client is built, exit 2:
+
+```
+emrgrep: profile "prod-emr" has no region; add a "region = <aws-region>" line to its section in ~/.aws/credentials or ~/.aws/config, or pass -region <aws-region>
+```
+
 `-profile` and `-region` compose, and `-region` wins over the profile's
 own region. That matters for the EMR lookup behind `-cluster-name` /
 `-cluster-id`, which is regional and is *not* auto-detected: a cluster
-outside the profile's default region needs `-region`.
+outside the profile's own region needs `-region`.
 
 ```
 emrgrep -profile prod-emr -region ap-southeast-2 \
@@ -756,10 +803,12 @@ budget — worker count alone bounds none of the ones that matter:
 
 ## AWS setup
 
-Credentials resolve through the standard chain (environment variables,
-`AWS_PROFILE`, instance/task roles). `-profile NAME` selects a named
-profile explicitly and takes precedence over `AWS_PROFILE` — see
-[Pick credentials with a named profile](#pick-credentials-with-a-named-profile).
+`-profile NAME` is required: it names the section of
+`~/.aws/credentials` / `~/.aws/config` that supplies both the
+credentials and the region, and the AWS SDK resolves it (static keys,
+`credential_process`, `role_arn`, SSO). The ambient chain —
+environment variables, `AWS_PROFILE`, instance/task roles — is not a
+substitute; see [Name the profile](#name-the-profile-required).
 Least-privilege IAM policy:
 
 ```json

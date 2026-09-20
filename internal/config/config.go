@@ -84,6 +84,16 @@ type Options struct {
 // workflows are discoverable without opening the README.
 const usageExamples = `
 Examples:
+  Every run names its AWS profile. -profile picks the credentials AND
+  the region from that profile's section in ~/.aws/credentials (or
+  ~/.aws/config); for an SSO profile, "aws sso login --profile prod-emr"
+  first:
+    emrgrep -profile prod-emr -cluster-name hbase-prod -grep ERROR
+
+  Put it in the config file once and it never needs typing again — the
+  examples below assume that:
+      profile: prod-emr
+
   Grep a prefix for a pattern:
     emrgrep -bucket my-emr-logs -prefix logs/j-1ABC/ -grep 'ERROR|Exception'
 
@@ -126,9 +136,9 @@ Examples:
   Only objects modified on one UTC day (-after inclusive, -before exclusive):
     emrgrep -bucket b -prefix logs/ -after 2026-07-20 -before 2026-07-21 -grep ERROR
 
-  Pick the AWS credentials with a named profile (beats $AWS_PROFILE;
-  for an SSO profile, "aws sso login --profile prod-emr" first):
-    emrgrep -profile prod-emr -cluster-name hbase-prod -grep ERROR
+  A cluster outside the profile's own region needs -region: the EMR
+  lookup is regional and, unlike bucket regions, is not auto-detected:
+    emrgrep -profile prod-emr -region ap-southeast-2 -cluster-name hbase-prod -grep ERROR
 
 Config file:
   Standing defaults are read from ~/.config/emrgrep/config.yaml (or
@@ -203,8 +213,8 @@ func NewFlagSet(name string, out io.Writer) (*flag.FlagSet, *Options) {
 	fs.BoolVar(&o.SanitizeOutput, "sanitize-output", true, "replace control characters in output")
 	fs.BoolVar(&o.MDReport, "md", false, "write a Markdown report to ~/logscan/<yyyy-mm-dd>/<app-id>.md: matched file names, matches grouped per file, and the run summary (requires -app-id and -grep)")
 	fs.IntVar(&o.MaxWarnings, "max-warnings", 100, "stderr warning cap (0 = unlimited)")
-	fs.StringVar(&o.Region, "region", "", "AWS region override")
-	fs.StringVar(&o.Profile, "profile", "", "named profile from ~/.aws/config and ~/.aws/credentials; overrides $AWS_PROFILE (default: the standard credential chain)")
+	fs.StringVar(&o.Region, "region", "", "AWS region override; without it the region comes from the profile's section in ~/.aws/credentials or ~/.aws/config")
+	fs.StringVar(&o.Profile, "profile", "", "REQUIRED: named profile from ~/.aws/credentials and ~/.aws/config; supplies both the credentials and the region (may instead be set in the config file)")
 	fs.DurationVar(&o.Progress, "progress", 0, "print a status line to stderr every interval, e.g. 2s (0 = off)")
 	fs.BoolVar(&o.Verbose, "verbose", false, "log each listing page and each object as scanning starts (stderr)")
 	fs.StringVar(&o.Color, "color", "auto", `colorize results: "auto" (only when stdout is a terminal), "always", or "never"`)
@@ -333,6 +343,16 @@ func (o *Options) Build() (*scan.Config, error) {
 	// at all — into a usage error that names the value (M-03).
 	if o.Profile != strings.TrimSpace(o.Profile) {
 		return nil, fmt.Errorf("-profile must not have leading or trailing whitespace, got %q", o.Profile)
+	}
+	// Every run names the account it reads from. Falling back to the
+	// ambient credential chain would let a scan land in whichever
+	// account the environment happens to point at, which is exactly
+	// the mistake this tool should not make quietly. A config-file
+	// "profile:" key counts — by Build time the file has been layered
+	// in — but $AWS_PROFILE does not: it is ambient too.
+	if o.Profile == "" {
+		return nil, fmt.Errorf(`-profile is required: name the AWS profile to use, e.g. -profile prod-emr ` +
+			`(or set "profile: prod-emr" in the config file)`)
 	}
 
 	cfg := &scan.Config{

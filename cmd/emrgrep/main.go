@@ -171,6 +171,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "emrgrep: loading AWS configuration: %v\n", err)
 		return 2
 	}
+	// A region has to come from somewhere before any client is built.
+	// The SDK takes it from -region, the environment, or the profile's
+	// own "region =" line — which it reads from ~/.aws/credentials as
+	// readily as from ~/.aws/config. With none of those, the EMR client
+	// would fail with a bare SDK error and the S3 path would quietly
+	// probe us-east-1, so say plainly what is missing and where it goes.
+	if awsCfg.Region == "" {
+		fmt.Fprintf(stderr, "emrgrep: profile %q has no region; add a \"region = <aws-region>\" line to its "+
+			"section in ~/.aws/credentials or ~/.aws/config, or pass -region <aws-region>\n", opts.Profile)
+		return 2
+	}
 	// Cluster scoping: -cluster-name resolves EVERY running/waiting
 	// cluster with that name — same-name clusters are siblings, and
 	// the application under investigation may live on any of them —
@@ -445,15 +456,18 @@ func newS3Client(cfg aws.Config) *s3.Client {
 }
 
 // awsLoadOptions turns the credential/region flags into SDK load
-// options. Anything not named by a flag is left to the default chain,
-// so environment variables, $AWS_PROFILE, and instance/task roles keep
-// working untouched.
+// options.
 //
-// -profile names a section of ~/.aws/config and ~/.aws/credentials and
-// is resolved by the SDK, which is what makes SSO, credential_process,
-// and role_arn profiles work without any code here. It takes
-// precedence over $AWS_PROFILE. -region is an explicit override and
-// outranks the profile's own region, so the two flags compose.
+// -profile is required (config.Options.Build enforces it) and names a
+// section of ~/.aws/credentials and ~/.aws/config. Resolution is the
+// SDK's job, which is what makes SSO, credential_process, and role_arn
+// profiles work without any code here — and what makes the profile's
+// region arrive with it: LoadSharedConfigProfile merges both files, so
+// a "region =" line in ~/.aws/credentials is picked up exactly like
+// one in ~/.aws/config (and wins when both define it).
+//
+// -region is an explicit override that outranks the profile's own
+// region, so the two flags compose.
 func awsLoadOptions(opts *config.Options) []func(*awsconfig.LoadOptions) error {
 	var loadOpts []func(*awsconfig.LoadOptions) error
 	if opts.Region != "" {
