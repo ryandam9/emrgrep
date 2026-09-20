@@ -36,7 +36,7 @@ func TestWriteMDReport(t *testing.T) {
 	// A non-UTC zone proves the timestamp renders in the local zone it
 	// was produced in (main passes time.Now()), not converted to UTC.
 	now := time.Date(2026, 8, 4, 20, 30, 0, 0, time.FixedZone("AEST", 10*3600))
-	if err := writeMDReport(path, "application_1_2", "ERROR", []string{"s3://b/logs/j-1/containers/application_1_2/"}, []string{key1, key2}, matches, runLog, now); err != nil {
+	if err := writeMDReport(path, "application_1_2", "ERROR", []string{"s3://b/logs/j-1/containers/application_1_2/"}, []string{key1, key2}, matches, 0, runLog, now); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(path)
@@ -71,7 +71,7 @@ func TestWriteMDReport(t *testing.T) {
 // A run with no matches still writes a well-formed report.
 func TestWriteMDReportNoMatches(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "application_9_9.md")
-	err := writeMDReport(path, "application_9_9", "FATAL", []string{"s3://b/p/"}, nil, nil,
+	err := writeMDReport(path, "application_9_9", "FATAL", []string{"s3://b/p/"}, nil, nil, 0,
 		"emrgrep: scanning s3://b/p/\n", time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
@@ -90,7 +90,7 @@ func TestWriteMDReportNoMatches(t *testing.T) {
 func TestWriteMDReportFenceEscaping(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "application_3_3.md")
 	matches := []mdMatch{{Key: "s3://b/k", LineNo: 1, Text: "evil line with ``` fence"}}
-	if err := writeMDReport(path, "application_3_3", "fence", []string{"s3://b/p/"}, []string{"s3://b/k"}, matches, "log\n", time.Unix(0, 0)); err != nil {
+	if err := writeMDReport(path, "application_3_3", "fence", []string{"s3://b/p/"}, []string{"s3://b/k"}, matches, 0, "log\n", time.Unix(0, 0)); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)
@@ -112,5 +112,36 @@ func TestReportPathDateDirectory(t *testing.T) {
 	want := filepath.Join(home, "logscan", "2026-08-05", "application_1_2.md")
 	if got != want {
 		t.Fatalf("reportPath = %q, want %q", got, want)
+	}
+}
+
+// When the in-memory cap drops matches, the report says so: a reader
+// must never mistake a truncated list for the whole story.
+func TestWriteMDReportStatesTruncation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "application_4_4.md")
+	matches := []mdMatch{{Key: "s3://b/k", LineNo: 1, Text: "ERROR one"}}
+	if err := writeMDReport(path, "application_4_4", "ERROR", []string{"s3://b/p/"},
+		[]string{"s3://b/k"}, matches, 99, "log\n", time.Unix(0, 0)); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(path)
+	if !strings.Contains(string(got), "- **Matches listed**: 1 of 100") {
+		t.Errorf("report must state the truncation:\n%s", got)
+	}
+	if !strings.Contains(string(got), "-max-total-matches") {
+		t.Errorf("report must name the way to bound the scan:\n%s", got)
+	}
+}
+
+// A complete report carries no truncation line at all.
+func TestWriteMDReportNoTruncationLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "application_5_5.md")
+	if err := writeMDReport(path, "application_5_5", "ERROR", []string{"s3://b/p/"}, nil, nil, 0,
+		"log\n", time.Unix(0, 0)); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(path)
+	if strings.Contains(string(got), "Matches listed") {
+		t.Errorf("no truncation line expected:\n%s", got)
 	}
 }

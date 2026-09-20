@@ -168,6 +168,16 @@ func ScanObject(ctx context.Context, bucket string, desc *ObjectDescriptor, body
 			out.PartialWhy = "object timeout before end of stream"
 		}
 		out.ErrClass = ErrClassTimeout
+	case s.streamErr != nil && s.linesSeen == 0:
+		// Nothing was decoded at all. Unlike gzip and zip, whose
+		// headers are validated when the reader is opened, bzip2
+		// fails on the first read — so a wholly corrupt .bz2 arrives
+		// here as a stream error rather than an open error. It is the
+		// same hard failure and must be accounted as one, not as a
+		// partial scan that found nothing.
+		out.Partial, out.PartialWhy = false, ""
+		out.Err = s.streamErr
+		out.ErrClass = classifyContentError(ctx, s.streamErr)
 	case s.streamErr != nil:
 		// scanLines already marked the object partial; classify it.
 		out.ErrClass = classifyContentError(ctx, s.streamErr)

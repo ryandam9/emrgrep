@@ -101,33 +101,55 @@ func run(args []string, stdout, stderr io.Writer) int {
 		opts.GrepPattern = pattern
 	}
 
-	// A file-provided "cat = true" is a standing default like md: it
-	// applies when no pattern narrows the content and is ignored when
-	// one is in play. An explicit -cat keeps strict validation.
-	if opts.Cat && !cliSet["cat"] && fileSet["cat"] && opts.GrepPattern != "" {
+	// Standing defaults are preferences, not demands. A value that
+	// reached an option from the config file is dropped whenever the
+	// run it landed on cannot use it, so one config file serves
+	// list-only, app-scoped, and cluster-wide runs alike. The same
+	// option given explicitly on the command line keeps strict
+	// validation and still fails fast — asking for something
+	// impossible in the command you just typed is a usage error.
+	fromFile := func(name string) bool { return !cliSet[name] && fileSet[name] }
+
+	// "cat = true" applies when no pattern narrows the content and is
+	// ignored when one is in play.
+	if opts.Cat && fromFile("cat") && opts.GrepPattern != "" {
 		opts.Cat = false
 	}
-	// Same standing-default rule for "download: true" in the config
-	// file: it applies only to patternless app-scoped runs.
-	if opts.Download && !cliSet["download"] && fileSet["download"] && (opts.AppID == "" || opts.GrepPattern != "" || opts.Cat) {
+	// "download: true" applies only to patternless app-scoped runs.
+	if opts.Download && fromFile("download") && (opts.AppID == "" || opts.GrepPattern != "" || opts.Cat) {
 		opts.Download = false
 	}
-
-	// "md = true" in the config file is a standing default, not a
-	// demand: it applies when the run is app-scoped with a pattern
-	// (-app-id and -grep present) and is silently ignored otherwise, so
-	// the same config file still serves list-only and cluster-wide
-	// runs. An explicit -md on the command line keeps strict validation.
-	if opts.MDReport && !cliSet["md"] && fileSet["md"] && (opts.AppID == "" || opts.GrepPattern == "") {
+	// "md = true" applies when the run is app-scoped with a pattern
+	// (-app-id and -grep present).
+	if opts.MDReport && fromFile("md") && (opts.AppID == "" || opts.GrepPattern == "") {
 		opts.MDReport = false
 	}
 
-	// -group defaults on for humans: when neither the command line nor
-	// the config file chose, group whenever stdout is a terminal (and
-	// grouping is applicable). Piped/redirected output keeps the
-	// stable single-line format.
-	groupSet := cliSet["group"] || fileSet["group"]
-	opts.Group = resolveGroup(groupSet, opts.Group, opts.GrepPattern != "" || opts.Cat, opts.NamesOnly, isTerminal(stdout))
+	// -l, -discover-apps, and -max-total-matches all need content to
+	// scan, and -discover-apps additionally needs -l. As standing
+	// defaults they drop out of runs that cannot use them; without
+	// this a config file holding "l: true" would make every plain
+	// listing run fail with "-l requires -grep".
+	contentRun := opts.GrepPattern != "" || opts.Cat
+	if opts.NamesOnly && fromFile("l") && (!contentRun || opts.Download) {
+		opts.NamesOnly = false
+	}
+	if opts.DiscoverApps && fromFile("discover-apps") && !opts.NamesOnly {
+		opts.DiscoverApps = false
+	}
+	if opts.MaxTotalMatches > 0 && fromFile("max-total-matches") && !contentRun {
+		opts.MaxTotalMatches = 0
+	}
+	if opts.MaxMatches > 0 && fromFile("max-matches") && !contentRun {
+		opts.MaxMatches = 0
+	}
+
+	// -group defaults on for humans: when the command line did not
+	// choose, group whenever grouping applies — because the config
+	// file asked for it, or because stdout is a terminal.
+	// Piped/redirected output keeps the stable single-line format.
+	opts.Group = resolveGroup(cliSet["group"], fileSet["group"], opts.Group,
+		contentRun, opts.NamesOnly, isTerminal(stdout))
 
 	cfg, err := opts.Build()
 	if err != nil {
@@ -144,7 +166,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsLoadOptions(opts)...)
+	awsCfg, err := loadAWSConfig(ctx, awsLoadOptions(opts)...)
 	if err != nil {
 		fmt.Fprintf(stderr, "emrgrep: loading AWS configuration: %v\n", err)
 		return 2
@@ -196,6 +218,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var mdBuf bytes.Buffer // scope echoes + summaries
 	var mdScopes, mdMatched []string
 	var mdMatches []mdMatch
+	var mdDropped int64 // matches past mdMaxMatches: counted, not kept
 	writeReport := func() (failed bool) {
 		if !opts.MDReport {
 			return false
@@ -209,13 +232,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 		now := time.Now()
 		path, err := reportPath(opts.AppID, now)
 		if err == nil {
-			err = writeMDReport(path, opts.AppID, patternDisplay, mdScopes, mdMatched, mdMatches, mdBuf.String(), now)
+			err = writeMDReport(path, opts.AppID, patternDisplay, mdScopes, mdMatched, mdMatches, mdDropped, mdBuf.String(), now)
 		}
 		if err != nil {
 			fmt.Fprintf(stderr, "emrgrep: %v\n", err)
 			return true
 		}
 		fmt.Fprintf(stderr, "emrgrep: report written to %s\n", path)
+		if mdDropped > 0 {
+			fmt.Fprintf(stderr, "emrgrep: the report lists the first %d matches; %d more matched and are not in it "+
+				"(narrow the pattern, or bound the scan with -max-total-matches)\n", mdMaxMatches, mdDropped)
+		}
 		return false
 	}
 
@@ -242,6 +269,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		worst = 2
 	}
 	remaining := cfg.MaxTotalMatches // 0 = unlimited
+	// Same-name sibling clusters usually share one log bucket, so the
+	// region probe is answered once per bucket rather than per scope.
+	bucketRegions := map[string]string{}
 	for _, sc := range scopes {
 		if cfg.MaxTotalMatches > 0 && remaining <= 0 {
 			break // global match budget exhausted
@@ -258,7 +288,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		// failures fall back to the configured region.
 		scopeAWS := awsCfg.Copy()
 		if opts.Region == "" {
-			if region, ok := resolveBucketRegion(ctx, awsCfg, runCfg.Bucket); ok {
+			region, cached := bucketRegions[runCfg.Bucket]
+			if !cached {
+				// "" is cached too: a bucket whose region cannot be
+				// discovered must not be probed again per scope.
+				region, _ = resolveBucketRegion(ctx, awsCfg, runCfg.Bucket, opts.ExpectedBucketOwner)
+				bucketRegions[runCfg.Bucket] = region
+			}
+			if region != "" {
 				scopeAWS.Region = region
 			}
 		}
@@ -275,6 +312,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 			// each run is safe. Sanitization matches what was printed.
 			sanitize, bucket := runCfg.SanitizeOutput, runCfg.Bucket
 			runCfg.RecordMatch = func(r scan.Result) {
+				// Every recorded match keeps its whole line until the
+				// report is written at the end of the run, so the
+				// slice is capped: a wide pattern over a busy
+				// application would otherwise grow without bound.
+				// Matches past the cap are counted and reported in
+				// the report and on stderr, never silently dropped.
+				if len(mdMatches) >= mdMaxMatches {
+					mdDropped++
+					return
+				}
 				key, entry, text := r.Key, r.ZipEntry, string(r.Line)
 				if sanitize {
 					key, entry, text = scan.SanitizeString(key), scan.SanitizeString(entry), scan.SanitizeString(text)
@@ -328,15 +375,24 @@ func combineExit(a, b int) int {
 	return a
 }
 
-// resolveGroup decides the effective -group value. An explicit flag
-// always wins; otherwise grouping defaults on exactly when it is
-// applicable (a content grep, not names-only) and stdout is a
-// terminal — pipes keep the stable single-line format.
-func resolveGroup(explicit, flagValue, grepSet, namesOnly, tty bool) bool {
-	if explicit {
+// resolveGroup decides the effective -group value. An explicit
+// command-line flag always wins, including when it asks for a
+// combination Build will reject — that is a usage error worth
+// reporting. Otherwise grouping happens only where it applies (a
+// content scan, not names-only), and there the config file's choice
+// wins over terminal detection; pipes keep the stable single-line
+// format.
+func resolveGroup(cliSet, fileSet, flagValue, contentRun, namesOnly, tty bool) bool {
+	if cliSet {
 		return flagValue
 	}
-	return grepSet && !namesOnly && tty
+	if !contentRun || namesOnly {
+		return false // grouping does not apply; never fail over a default
+	}
+	if fileSet {
+		return flagValue
+	}
+	return tty
 }
 
 // resolveColor decides whether a stream gets ANSI colors. "always"
@@ -365,6 +421,15 @@ func isTerminal(w io.Writer) bool {
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
+// loadAWSConfig and s3ClientOptions are the two seams run() is wired
+// through, so the whole orchestration — scope loop, cross-scope match
+// budget, report writing, exit-code combination — can be exercised
+// against a local stub instead of AWS. Production never replaces them.
+var (
+	loadAWSConfig   = awsconfig.LoadDefaultConfig
+	s3ClientOptions = func(*s3.Options) {}
+)
+
 // newS3Client builds the S3 client with response-checksum validation
 // set to WhenRequired. The SDK's default (WhenSupported) logs a
 // "Response has no supported checksum" WARN line for every GetObject
@@ -375,6 +440,7 @@ func isTerminal(w io.Writer) bool {
 func newS3Client(cfg aws.Config) *s3.Client {
 	return s3.NewFromConfig(cfg, func(o *s3.Options) {
 		o.ResponseChecksumValidation = aws.ResponseChecksumValidationWhenRequired
+		s3ClientOptions(o)
 	})
 }
 
@@ -404,13 +470,22 @@ func awsLoadOptions(opts *config.Options) []func(*awsconfig.LoadOptions) error {
 // on success, and via the x-amz-bucket-region header even on the
 // 301/403 responses a wrong-region or access-restricted probe gets.
 // The probe uses us-east-1 when no region is configured at all.
-func resolveBucketRegion(ctx context.Context, cfg aws.Config, bucket string) (string, bool) {
+//
+// expectedOwner carries -expected-bucket-owner, so the probe is held
+// to the same cross-account guard as every LIST and GET: without it
+// the one call that runs before the guard takes effect would be the
+// one that could reach a squatted bucket name.
+func resolveBucketRegion(ctx context.Context, cfg aws.Config, bucket, expectedOwner string) (string, bool) {
 	probe := cfg.Copy()
 	if probe.Region == "" {
 		probe.Region = "us-east-1"
 	}
 	client := newS3Client(probe)
-	out, err := client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(bucket)})
+	input := &s3.HeadBucketInput{Bucket: aws.String(bucket)}
+	if expectedOwner != "" {
+		input.ExpectedBucketOwner = aws.String(expectedOwner)
+	}
+	out, err := client.HeadBucket(ctx, input)
 	if err == nil {
 		if out.BucketRegion != nil && *out.BucketRegion != "" {
 			return *out.BucketRegion, true

@@ -2,6 +2,7 @@ package scan
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -84,6 +85,46 @@ func TestSanitizeUnicodePassthrough(t *testing.T) {
 	for _, s := range []string{"héllo wörld", "日本語のログ", "emoji ✅ fine"} {
 		if got := SanitizeString(s); got != s {
 			t.Errorf("valid text mangled: %q -> %q", s, got)
+		}
+	}
+}
+
+// Invisible formatting characters that reorder or hide output must be
+// replaced, not just the bidi and zero-width ranges. A log line can
+// carry any of these, and a terminal renders them as nothing at all —
+// which is exactly what makes them worth neutralizing.
+func TestSanitizeInvisibleFormatting(t *testing.T) {
+	cases := []struct{ name, in string }{
+		{"word joiner", "before⁠after"},
+		{"invisible times", "a⁢b"},
+		{"invisible plus", "a⁤b"},
+		{"arabic letter mark", "x؜y"},
+		{"mongolian vowel separator", "x᠎y"},
+		{"interlinear anchor", "x￹y"},
+		{"interlinear terminator", "x￻y"},
+	}
+	for _, tc := range cases {
+		got := SanitizeString(tc.in)
+		if strings.ContainsAny(got, "⁠⁢⁤؜᠎￹￻") {
+			t.Errorf("%s: %q survived sanitization as %q", tc.name, tc.in, got)
+		}
+		if !strings.Contains(got, "?") {
+			t.Errorf("%s: expected a placeholder in %q", tc.name, got)
+		}
+	}
+}
+
+// Ordinary text — including non-ASCII that is perfectly safe to print
+// — must pass through untouched.
+func TestSanitizeLeavesOrdinaryTextAlone(t *testing.T) {
+	for _, s := range []string{
+		"plain ascii",
+		"tabs\tare\tfine",
+		"café — naïve — 日本語",
+		"emoji 🎯 and maths ∑∫",
+	} {
+		if got := SanitizeString(s); got != s {
+			t.Errorf("SanitizeString(%q) = %q, want unchanged", s, got)
 		}
 	}
 }

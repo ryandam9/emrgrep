@@ -210,11 +210,14 @@ The review's central architectural point: worker count alone bounds none of the 
 | Archive expansion | `-max-uncompressed-object-size` cumulative counter | 512 MiB per ZIP |
 | ZIP entry count | `-max-zip-entries` | 10 000 |
 | Scheduler memory | `-smallest-first-window` descriptors | 5 000 |
-| Queued output | bounded result channel | workers × 8 lines |
+| Queued output | result channel, bounded by slot count **and** total queued line bytes | workers × 8 lines, capped at 64 MiB |
+| Grouped-mode buffering | `groupFlushBytes` per in-flight object | 1 MiB × workers |
 | stderr volume | `-max-warnings` | 100 |
 | Wall clock | `-object-timeout`, `-overall-timeout` | off |
 
-Every budget violation is visible: a counter increments and, where an object was affected, it is classified as partially scanned or skipped — never silently absorbed.
+Queued output needs both bounds, not either one. A slot count alone is not a memory budget, because a queued line may be as large as `-max-line-size`: at `-workers 256 -max-line-size 256` a count-only queue admits hundreds of gigabytes. The writer therefore also tracks the bytes of every accepted-but-unwritten line and blocks `Emit` once the byte budget is full, releasing waiters as each result is written or copied into its group buffer. An empty queue always admits the next result whatever its size, so a line larger than the whole budget can never wedge the run.
+
+Every budget violation is visible: a counter increments and, where an object was affected, it is classified as partially scanned or skipped — never silently absorbed. The one budget outside the engine is the `-md` report, which holds matches in memory until it is rendered at the end of the run; it is capped at 50 000 matches, and a run that reaches the cap says so on stderr and in the report itself.
 
 ## 10. Failure Policy, Error Classification, Exit Codes
 

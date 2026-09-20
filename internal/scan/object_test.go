@@ -325,9 +325,36 @@ func TestBzip2(t *testing.T) {
 	}
 }
 
-func TestCorruptBzip2(t *testing.T) {
+// A wholly undecodable .bz2 is a hard failure, classified the same as
+// a corrupt .gz. bzip2 differs only in WHEN it notices: gzip and zip
+// validate their headers when the reader is opened, while bzip2 fails
+// on the first read, so the failure arrives as a stream error. That
+// must not be mistaken for a partial scan — nothing was scanned at
+// all, and "partially scanned, 0 matches" reads as an object that had
+// no matches rather than one that could not be read.
+func TestCorruptBzip2IsAHardFailure(t *testing.T) {
 	r := runObjectScan(t, "logs/x.bz2", []byte("BZh9 not really bzip2 data"), grepOpts(t, "x"))
-	if !r.outcome.Partial && r.outcome.Err == nil {
-		t.Fatalf("corrupt bzip2 must be partial or failed: %+v", r.outcome)
+	if r.outcome.Err == nil {
+		t.Fatalf("corrupt bzip2 must fail, not partially succeed: %+v", r.outcome)
+	}
+	if r.outcome.Partial {
+		t.Errorf("nothing was decoded, so the object is not partially scanned: %+v", r.outcome)
+	}
+	if r.outcome.ErrClass != ErrClassCorrupt {
+		t.Errorf("ErrClass = %v, want %v (same as a corrupt .gz)", r.outcome.ErrClass, ErrClassCorrupt)
+	}
+}
+
+// A .bz2 that decodes for a while and then breaks IS a partial scan:
+// some lines were delivered, so the run must report the object as
+// incomplete rather than failed, and keep the matches it found.
+func TestTruncatedBzip2IsPartial(t *testing.T) {
+	truncated := bz2Sample[:len(bz2Sample)-6]
+	r := runObjectScan(t, "logs/x.bz2", truncated, grepOpts(t, "ERROR"))
+	if r.outcome.Err != nil {
+		t.Fatalf("a stream that decoded some data must not be a hard failure: %+v", r.outcome)
+	}
+	if !r.outcome.Partial {
+		t.Errorf("expected a partial scan: %+v", r.outcome)
 	}
 }

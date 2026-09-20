@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -50,7 +51,7 @@ func DefaultConfigPath() string {
 		return ""
 	}
 	for _, name := range []string{"config.yaml", "config.yml"} {
-		p := home + "/.config/emrgrep/" + name
+		p := filepath.Join(home, ".config", "emrgrep", name)
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}
