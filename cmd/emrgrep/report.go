@@ -8,6 +8,15 @@ import (
 	"time"
 )
 
+// mdMaxMatches bounds how many matches the -md report holds in
+// memory. Every recorded match keeps its full line until the report
+// is rendered at the end of the run, so without a cap a wide pattern
+// over a busy application grows the slice without limit. The cap is
+// generous enough that ordinary investigations never reach it, and
+// reaching it is reported rather than hidden — the fix is a narrower
+// pattern or -max-total-matches, which bounds the scan itself.
+const mdMaxMatches = 50000
+
 // mdMatch is one recorded match line for the -md report, already
 // sanitized. Key is the full s3:// URI so multi-cluster runs stay
 // unambiguous.
@@ -75,8 +84,10 @@ func mdCodeBlock(content string) string {
 // writeMDReport renders and writes the -md Markdown report: the run's
 // header facts, the matched file names, the matches grouped per file
 // (each file a heading with its lines in one block), and the run
-// summary.
-func writeMDReport(path, appID, pattern string, scopes, matchedKeys []string, matches []mdMatch, runLog string, now time.Time) error {
+// summary. dropped is the number of matches beyond mdMaxMatches that
+// were counted but not kept; it is stated in the report so a reader
+// can never mistake a truncated list for the whole story.
+func writeMDReport(path, appID, pattern string, scopes, matchedKeys []string, matches []mdMatch, dropped int64, runLog string, now time.Time) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# emrgrep — %s\n\n", appID)
 	// Local time, zone spelled out: the report is read on the machine
@@ -87,7 +98,12 @@ func writeMDReport(path, appID, pattern string, scopes, matchedKeys []string, ma
 	for _, s := range scopes {
 		fmt.Fprintf(&b, "- **Scanned**: `%s`\n", s)
 	}
-	fmt.Fprintf(&b, "- **Files with matches**: %d\n\n", len(matchedKeys))
+	fmt.Fprintf(&b, "- **Files with matches**: %d\n", len(matchedKeys))
+	if dropped > 0 {
+		fmt.Fprintf(&b, "- **Matches listed**: %d of %d — the rest are not in this report; "+
+			"narrow the pattern or bound the scan with `-max-total-matches`\n", len(matches), int64(len(matches))+dropped)
+	}
+	b.WriteString("\n")
 
 	b.WriteString("## Files with matches\n\n")
 	b.WriteString(mdCodeBlock(strings.Join(matchedKeys, "\n")))

@@ -32,7 +32,7 @@ func (s *stubHTTP) Do(req *http.Request) (*http.Response, error) {
 	}, nil
 }
 
-func stubConfig(h *stubHTTP, region string) aws.Config {
+func stubConfig(h aws.HTTPClient, region string) aws.Config {
 	return aws.Config{
 		Region:      region,
 		Credentials: credentials.NewStaticCredentialsProvider("AKID", "SECRET", ""),
@@ -47,7 +47,7 @@ func stubConfig(h *stubHTTP, region string) aws.Config {
 // failures like a us-east-1 client probing an ap-southeast-4 bucket.
 func TestResolveBucketRegionFromRedirect(t *testing.T) {
 	h := &stubHTTP{status: 301, header: http.Header{"X-Amz-Bucket-Region": []string{"ap-southeast-4"}}}
-	region, ok := resolveBucketRegion(context.Background(), stubConfig(h, "us-east-1"), "b")
+	region, ok := resolveBucketRegion(context.Background(), stubConfig(h, "us-east-1"), "b", "")
 	if !ok || region != "ap-southeast-4" {
 		t.Fatalf("got %q ok=%v, want ap-southeast-4", region, ok)
 	}
@@ -57,7 +57,7 @@ func TestResolveBucketRegionFromRedirect(t *testing.T) {
 // permission.
 func TestResolveBucketRegionFromForbidden(t *testing.T) {
 	h := &stubHTTP{status: 403, header: http.Header{"X-Amz-Bucket-Region": []string{"eu-central-2"}}}
-	region, ok := resolveBucketRegion(context.Background(), stubConfig(h, "us-east-1"), "b")
+	region, ok := resolveBucketRegion(context.Background(), stubConfig(h, "us-east-1"), "b", "")
 	if !ok || region != "eu-central-2" {
 		t.Fatalf("got %q ok=%v, want eu-central-2", region, ok)
 	}
@@ -67,7 +67,7 @@ func TestResolveBucketRegionFromForbidden(t *testing.T) {
 // header (deserialized into BucketRegion).
 func TestResolveBucketRegionFromSuccess(t *testing.T) {
 	h := &stubHTTP{status: 200, header: http.Header{"X-Amz-Bucket-Region": []string{"us-west-2"}}}
-	region, ok := resolveBucketRegion(context.Background(), stubConfig(h, "us-west-2"), "b")
+	region, ok := resolveBucketRegion(context.Background(), stubConfig(h, "us-west-2"), "b", "")
 	if !ok || region != "us-west-2" {
 		t.Fatalf("got %q ok=%v, want us-west-2", region, ok)
 	}
@@ -77,7 +77,41 @@ func TestResolveBucketRegionFromSuccess(t *testing.T) {
 // the caller falls back to the configured region.
 func TestResolveBucketRegionTransportFailure(t *testing.T) {
 	h := &stubHTTP{err: errors.New("dial tcp: no route to host")}
-	if region, ok := resolveBucketRegion(context.Background(), stubConfig(h, "us-east-1"), "b"); ok {
+	if region, ok := resolveBucketRegion(context.Background(), stubConfig(h, "us-east-1"), "b", ""); ok {
 		t.Fatalf("transport failure must not resolve a region, got %q", region)
 	}
+}
+
+// -expected-bucket-owner must reach the region probe too: it is the
+// one S3 call that runs before the guard would otherwise take effect.
+func TestResolveBucketRegionSendsExpectedOwner(t *testing.T) {
+	h := &recordingHTTP{stubHTTP: stubHTTP{status: 200, header: http.Header{"X-Amz-Bucket-Region": []string{"us-west-2"}}}}
+	if _, ok := resolveBucketRegion(context.Background(), stubConfig(h, "us-west-2"), "b", "111122223333"); !ok {
+		t.Fatal("probe should have resolved")
+	}
+	if got := h.lastHeader.Get("x-amz-expected-bucket-owner"); got != "111122223333" {
+		t.Fatalf("x-amz-expected-bucket-owner = %q, want 111122223333", got)
+	}
+}
+
+// Without the flag the header must be absent, not empty.
+func TestResolveBucketRegionOmitsEmptyOwner(t *testing.T) {
+	h := &recordingHTTP{stubHTTP: stubHTTP{status: 200, header: http.Header{"X-Amz-Bucket-Region": []string{"us-west-2"}}}}
+	if _, ok := resolveBucketRegion(context.Background(), stubConfig(h, "us-west-2"), "b", ""); !ok {
+		t.Fatal("probe should have resolved")
+	}
+	if _, present := h.lastHeader["X-Amz-Expected-Bucket-Owner"]; present {
+		t.Fatalf("header must be absent without the flag: %v", h.lastHeader)
+	}
+}
+
+// recordingHTTP keeps the headers of the request it answered.
+type recordingHTTP struct {
+	stubHTTP
+	lastHeader http.Header
+}
+
+func (r *recordingHTTP) Do(req *http.Request) (*http.Response, error) {
+	r.lastHeader = req.Header.Clone()
+	return r.stubHTTP.Do(req)
 }

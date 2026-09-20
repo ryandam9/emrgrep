@@ -40,24 +40,35 @@ func TestBadColorValueExitsTwo(t *testing.T) {
 	}
 }
 
-// -group defaults on only for interactive terminals with a content
-// grep; explicit flags always win.
+// -group defaults on only where grouping applies: a content scan that
+// is not names-only. Within that, an explicit command-line flag wins,
+// then the config file's choice, then terminal detection. Where
+// grouping does not apply the answer is always false, so a config
+// file carrying "group: true" can never fail an unrelated run.
 func TestResolveGroup(t *testing.T) {
 	cases := []struct {
-		explicit, flagValue, grepSet, namesOnly, tty bool
-		want                                         bool
+		name                                           string
+		cliSet, fileSet, flagValue, content, namesOnly bool
+		tty                                            bool
+		want                                           bool
 	}{
-		{false, false, true, false, true, true},   // auto: TTY + grep → grouped
-		{false, false, true, false, false, false}, // auto: piped → flat
-		{false, false, false, false, true, false}, // auto: list-only → flat
-		{false, false, true, true, true, false},   // auto: -l → flat
-		{true, false, true, false, true, false},   // explicit -group=false wins on TTY
-		{true, true, true, false, false, true},    // explicit -group wins when piped
+		{"auto: TTY + content", false, false, false, true, false, true, true},
+		{"auto: piped", false, false, false, true, false, false, false},
+		{"auto: list-only", false, false, false, false, false, true, false},
+		{"auto: -l", false, false, false, true, true, true, false},
+		{"explicit -group=false beats TTY", true, false, false, true, false, true, false},
+		{"explicit -group beats pipe", true, false, true, true, false, false, true},
+		{"file group:true beats pipe", false, true, true, true, false, false, true},
+		{"file group:false beats TTY", false, true, false, true, false, true, false},
+		{"file group:true on list-only is dropped", false, true, true, false, false, true, false},
+		{"file group:true with -l is dropped", false, true, true, true, true, true, false},
+		{"explicit -group with -l is kept for Build to reject", true, false, true, true, true, true, true},
 	}
-	for i, tc := range cases {
-		if got := resolveGroup(tc.explicit, tc.flagValue, tc.grepSet, tc.namesOnly, tc.tty); got != tc.want {
-			t.Errorf("case %d: resolveGroup(%v,%v,%v,%v,%v) = %v, want %v",
-				i, tc.explicit, tc.flagValue, tc.grepSet, tc.namesOnly, tc.tty, got, tc.want)
+	for _, tc := range cases {
+		got := resolveGroup(tc.cliSet, tc.fileSet, tc.flagValue, tc.content, tc.namesOnly, tc.tty)
+		if got != tc.want {
+			t.Errorf("%s: resolveGroup(%v,%v,%v,%v,%v,%v) = %v, want %v", tc.name,
+				tc.cliSet, tc.fileSet, tc.flagValue, tc.content, tc.namesOnly, tc.tty, got, tc.want)
 		}
 	}
 }

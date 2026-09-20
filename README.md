@@ -61,8 +61,10 @@ reporting, and scripting with exit codes.
 -max-zip-entries N              default 10000
 -max-uncompressed-object-size MiB   cumulative ZIP expansion budget (default 512)
 -max-line-size MiB              oversized-line truncation boundary (default 4)
--max-matches N                  per object; whole ZIP = one object (0 = unlimited)
--max-total-matches N            stop the whole run after N matches (0 = unlimited)
+-max-matches N                  per object; whole ZIP = one object (0 = unlimited);
+                                needs -grep/-category/-cat
+-max-total-matches N            stop the whole run after N matches (0 = unlimited);
+                                needs -grep/-category/-cat
 -l                              names only; first-hit exit; best-effort IDs
 -discover-apps                  with -l: read on until an application ID is found
 -smallest-first                 windowed approximate size ordering
@@ -217,9 +219,11 @@ listing filters (`-ext`, `-after`/`-before`, `-max-size`), ETag
 If-Match consistency, per-object error classification, and the final
 summary (`downloaded N MiB`). A failed copy never leaves a partial
 file behind. `-download` requires `-app-id` and cannot be combined
-with `-grep`/`-category`/`-cat`; `download: true` also works as a
-config standing default that applies only to patternless app-scoped
-runs.
+with `-grep`/`-category`/`-cat`, nor with `-l` or `-max-matches` —
+it stores every object without reading any of them, so there is
+nothing for a content-match selector or a match cap to act on.
+`download: true` also works as a config standing default that applies
+only to patternless app-scoped runs.
 
 #### Save the run as a Markdown report
 
@@ -273,6 +277,17 @@ config file too (`md: true`) for always-on reports — as a standing
 default it applies only to runs that have both `-app-id` and `-grep`,
 and is silently ignored otherwise, so the same config file still
 serves list-only and cluster-wide scans.
+
+Every match is held in memory until the report is written at the end
+of the run, so the report lists at most 50 000 matches. A run that
+reaches the cap says so on stderr and in the report's header, naming
+the count it did not list — a truncated report can never be mistaken
+for a complete one. If you hit it, narrow the pattern or bound the
+scan itself with `-max-total-matches`.
+
+`-md` with `-l` is legal but thin: `-l` reports object names rather
+than lines, so the report lists the matched files and shows `(none)`
+under Matches. Drop `-l` when you want the lines in the report.
 
 #### Discover which application produced an error
 
@@ -616,6 +631,18 @@ command line takes priority over the file** — `emrgrep -grep FATAL`
 overrides the file for that run. Unknown keys and invalid values fail
 fast with the file and line number. `config` and `version` cannot be
 set from the file.
+
+**Standing defaults are preferences, not demands.** A value that only
+makes sense for some runs is dropped on the runs that cannot use it,
+instead of failing them: `group`, `l`, `discover-apps`, `max-matches`,
+`max-total-matches`, `md`, `cat`, and `download` all behave this way.
+So a config file carrying `group: true` still leaves
+`emrgrep -app-id application_..._0042` (a plain file listing) working,
+and `l: true` does not turn every patternless run into a
+`-l requires -grep` error. The same options typed on the command line
+keep strict validation — asking for an impossible combination in the
+command you just typed is a usage error worth reporting, not a
+preference to ignore.
 
 #### Use exit codes in scripts
 

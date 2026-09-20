@@ -52,6 +52,13 @@ func TestValidationFailFast(t *testing.T) {
 		{"uncompressed above cap", []string{"-bucket", "b", "-prefix", "p", "-max-uncompressed-object-size", "4194305"}, "-max-uncompressed-object-size"},
 		{"line size above cap", []string{"-bucket", "b", "-prefix", "p", "-max-line-size", "257"}, "-max-line-size"},
 		{"group without grep", []string{"-bucket", "b", "-prefix", "p", "-group"}, "-group requires -grep"},
+		// A flag that cannot affect the run at hand is a usage error,
+		// not something to accept and ignore: -download reads nothing,
+		// so a content-match selector and a per-object match cap have
+		// nothing to act on.
+		{"download with names-only", []string{"-bucket", "b", "-prefix", "p", "-app-id", "application_1_2", "-download", "-l"}, "cannot be combined with -l"},
+		{"max-matches without a pattern", []string{"-bucket", "b", "-prefix", "p", "-max-matches", "5"}, "-max-matches requires -grep"},
+		{"max-matches with download", []string{"-bucket", "b", "-prefix", "p", "-app-id", "application_1_2", "-download", "-max-matches", "5"}, "-max-matches requires -grep"},
 		{"group with names-only", []string{"-bucket", "b", "-prefix", "p", "-grep", "x", "-l", "-group"}, "-group cannot be combined with -l"},
 		{"both cluster flags", []string{"-cluster-name", "hbase", "-cluster-id", "j-1A"}, "mutually exclusive"},
 		{"bad cluster id", []string{"-cluster-id", "1ABC"}, "-cluster-id must look like"},
@@ -264,5 +271,29 @@ func TestDownloadValidation(t *testing.T) {
 	}
 	if err := build(t, "-cluster-name", "h", "-app-id", "application_1_2", "-download", "-cat"); err == nil || !strings.Contains(err.Error(), "cannot be combined") {
 		t.Fatalf("download with cat: %v", err)
+	}
+	// -download reads nothing, so a content-match selector has
+	// nothing to select on. Accepting it silently would look like a
+	// filter that ran and matched everything.
+	if err := build(t, "-cluster-name", "h", "-app-id", "application_1_2", "-download", "-l"); err == nil || !strings.Contains(err.Error(), "cannot be combined with -l") {
+		t.Fatalf("download with -l: %v", err)
+	}
+}
+
+// The two match caps behave identically: both count matches, so both
+// need something producing matches. Before, only the run-wide one
+// said so and -max-matches was accepted and ignored.
+func TestMatchCapsRequireAPattern(t *testing.T) {
+	for _, flag := range []string{"-max-matches", "-max-total-matches"} {
+		if err := build(t, "-bucket", "b", "-prefix", "p", flag, "5"); err == nil ||
+			!strings.Contains(err.Error(), flag+" requires -grep") {
+			t.Errorf("%s on a list-only run: %v", flag, err)
+		}
+		if err := build(t, "-bucket", "b", "-prefix", "p", "-grep", "x", flag, "5"); err != nil {
+			t.Errorf("%s with -grep must be accepted: %v", flag, err)
+		}
+		if err := build(t, "-bucket", "b", "-prefix", "p", "-cat", flag, "5"); err != nil {
+			t.Errorf("%s with -cat must be accepted: %v", flag, err)
+		}
 	}
 }

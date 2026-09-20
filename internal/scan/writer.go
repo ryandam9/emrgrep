@@ -27,6 +27,13 @@ type Result struct {
 // WriterConfig bundles the writer's rendering options.
 type WriterConfig struct {
 	QueueDepth int
+	// QueueBytes caps the total size of the match lines queued but
+	// not yet written. QueueDepth alone bounds the queue by count,
+	// and a queued line may be as large as -max-line-size, so the two
+	// together are what actually bound writer memory (§9). 0 applies
+	// defaultQueueBytes; a single result is always admitted to an
+	// empty queue, so an oversized line can never wedge the run.
+	QueueBytes int64
 	Sanitize   bool
 	Color      bool
 	Group      bool     // print each object key once as a heading
@@ -43,6 +50,14 @@ type WriterConfig struct {
 // grouped mode before a segment is flushed early (repeating the
 // heading). Bounds writer memory at roughly workers × this value.
 const groupFlushBytes = 1 << 20
+
+// defaultQueueBytes is the standing budget for queued-but-unwritten
+// match lines. Counting queue slots is not enough on its own: at
+// -workers 256 and -max-line-size 256 a count-only bound admits
+// hundreds of gigabytes, which is not a budget at all. 64 MiB is far
+// above what ordinary log lines reach at any worker count, so the
+// budget only ever binds on genuinely huge lines.
+const defaultQueueBytes = 64 << 20
 
 type groupBuf struct {
 	lines []Result
@@ -76,37 +91,102 @@ type Writer struct {
 	done     chan struct{}
 	mu       sync.Mutex
 	writeErr error
+
+	// Byte accounting for the queue. queued is the size of the match
+	// lines accepted but not yet written; drained is closed and
+	// replaced every time the writer frees space, which wakes every
+	// blocked Emit at once without a lost-wakeup window (each waiter
+	// takes the channel under the same lock it reads queued under,
+	// before it blocks).
+	queueBytes int64
+	queued     int64
+	waiters    int
+	drained    chan struct{}
 }
 
 // NewWriter starts the writer goroutine. cancel is invoked on the
 // first write failure. Color is applied after sanitization, so scanned
 // content can never inject sequences that look like ours.
 func NewWriter(out io.Writer, cfg WriterConfig, cancel context.CancelFunc) *Writer {
+	queueBytes := cfg.QueueBytes
+	if queueBytes <= 0 {
+		queueBytes = defaultQueueBytes
+	}
 	w := &Writer{
-		ch:       make(chan Result, cfg.QueueDepth),
-		out:      bufio.NewWriterSize(out, 64*1024),
-		cancel:   cancel,
-		sanitize: cfg.Sanitize,
-		color:    cfg.Color,
-		group:    cfg.Group,
-		grep:     cfg.Grep,
-		record:   cfg.Record,
-		groups:   make(map[string]*groupBuf),
-		done:     make(chan struct{}),
+		ch:         make(chan Result, cfg.QueueDepth),
+		out:        bufio.NewWriterSize(out, 64*1024),
+		cancel:     cancel,
+		sanitize:   cfg.Sanitize,
+		color:      cfg.Color,
+		group:      cfg.Group,
+		grep:       cfg.Grep,
+		record:     cfg.Record,
+		groups:     make(map[string]*groupBuf),
+		done:       make(chan struct{}),
+		queueBytes: queueBytes,
+		drained:    make(chan struct{}),
 	}
 	go w.run()
 	return w
 }
 
 // Emit queues r for output. It returns false if the run is being
-// cancelled and the result was not accepted.
+// cancelled and the result was not accepted. A worker blocks here
+// while the queue already holds its byte budget, which is what keeps
+// a fast scan from turning a slow consumer into unbounded memory.
 func (w *Writer) Emit(ctx context.Context, r Result) bool {
+	n := int64(len(r.Line))
+	for {
+		w.mu.Lock()
+		// An empty queue always admits, whatever the line's size, so
+		// a line larger than the whole budget still gets through.
+		room := w.queued == 0 || w.queued+n <= w.queueBytes
+		if room {
+			w.queued += n
+		}
+		wake := w.drained
+		if !room {
+			// Counted inside the same critical section that found no
+			// room, so a release cannot slip between the two and
+			// leave this waiter asleep.
+			w.waiters++
+		}
+		w.mu.Unlock()
+		if room {
+			break
+		}
+		select {
+		case <-wake:
+		case <-ctx.Done():
+			return false
+		}
+	}
 	select {
 	case w.ch <- r:
 		return true
 	case <-ctx.Done():
+		w.release(n)
 		return false
 	}
+}
+
+// release returns n queued bytes to the budget and wakes every Emit
+// waiting for room. Results carrying no line bytes free nothing, and
+// an uncontended queue has nobody to wake, so neither case pays for a
+// broadcast — the writer is the whole run's serialization point and
+// must not allocate per result.
+func (w *Writer) release(n int64) {
+	if n == 0 {
+		return
+	}
+	w.mu.Lock()
+	w.queued -= n
+	if w.waiters > 0 {
+		close(w.drained)
+		w.drained = make(chan struct{})
+		w.waiters = 0
+	}
+	w.mu.Unlock()
 }
 
 // Close stops accepting results, waits for the goroutine to finish
@@ -136,9 +216,15 @@ func (w *Writer) run() {
 	}
 	for r := range w.ch {
 		if failed {
-			continue // drain so no worker blocks on a dead pipe
+			w.release(int64(len(r.Line))) // drain so no worker blocks on a dead pipe
+			continue
 		}
-		if err := w.write(r); err != nil {
+		err := w.write(r)
+		// The line has been written, or copied into its group buffer
+		// (which groupFlushBytes bounds separately); either way the
+		// queue no longer holds it.
+		w.release(int64(len(r.Line)))
+		if err != nil {
 			fail(err)
 			continue
 		}

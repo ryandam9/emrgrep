@@ -188,7 +188,7 @@ func NewFlagSet(name string, out io.Writer) (*flag.FlagSet, *Options) {
 	fs.IntVar(&o.MaxZipEntries, "max-zip-entries", 10000, "maximum entries per ZIP object")
 	fs.Int64Var(&o.MaxUncompressedMiB, "max-uncompressed-object-size", 512, "cumulative ZIP expansion budget in MiB")
 	fs.Int64Var(&o.MaxLineSizeMiB, "max-line-size", 4, "oversized-line truncation boundary in MiB")
-	fs.Int64Var(&o.MaxMatches, "max-matches", 0, "match cap per object; whole ZIP = one object (0 = unlimited)")
+	fs.Int64Var(&o.MaxMatches, "max-matches", 0, "match cap per object; whole ZIP = one object (0 = unlimited); needs -grep/-category/-cat")
 	fs.Int64Var(&o.MaxTotalMatches, "max-total-matches", 0, "stop the whole run after this many matches (0 = unlimited)")
 	fs.BoolVar(&o.NamesOnly, "l", false, "names only; first-hit exit; best-effort application IDs")
 	fs.BoolVar(&o.DiscoverApps, "discover-apps", false, "with -l: read on until an application ID is found")
@@ -245,6 +245,13 @@ func (o *Options) Build() (*scan.Config, error) {
 		if o.AppID == "" {
 			return nil, fmt.Errorf("-download requires -app-id (files are stored under ~/logscan/<yyyy-mm-dd>/<app-id>/)")
 		}
+		if o.NamesOnly {
+			// -l reports the objects whose CONTENT matched, which is
+			// a question -download never asks: it stores every object
+			// of the application without reading any of them. Silent
+			// acceptance would look like a filter that did nothing.
+			return nil, fmt.Errorf("-download stores every log file; it cannot be combined with -l, which selects objects by content match")
+		}
 	}
 	if o.MDReport {
 		if o.AppID == "" {
@@ -276,6 +283,12 @@ func (o *Options) Build() (*scan.Config, error) {
 	}
 	if o.MaxTotalMatches > 0 && o.GrepPattern == "" && !o.Cat {
 		return nil, fmt.Errorf("-max-total-matches requires -grep, -category, or -cat")
+	}
+	// The per-object cap needs content to count, exactly as the
+	// run-wide one does: nothing counts matches in list-only or
+	// download mode, so a cap given there would quietly do nothing.
+	if o.MaxMatches > 0 && o.GrepPattern == "" && !o.Cat {
+		return nil, fmt.Errorf("-max-matches requires -grep, -category, or -cat")
 	}
 	if o.Group && o.GrepPattern == "" && !o.Cat {
 		return nil, fmt.Errorf("-group requires -grep, -category, or -cat (list-only output is already one key per line)")
