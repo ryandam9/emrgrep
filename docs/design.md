@@ -264,14 +264,15 @@ The final summary separates fully scanned, partially scanned, skipped (with reas
 -expected-bucket-owner id       cross-account safety check
 -sanitize-output bool           default true
 -max-warnings N                 default 100
--region string                  AWS region override
+-region string                  AWS region override (else: the profile's region)
+-profile string                 REQUIRED: named profile; credentials + region
 ```
 
-Validation (M-03) is fail-fast with exit 2: worker/window/size ranges checked, `after < before` enforced, `-discover-apps` requires `-l`, malformed extension lists rejected; `0` means "unlimited/disabled" exactly where the help text says so. Regex mode uses Go RE2 semantics — no lookaround or backreferences — which is documented alongside `-F`.
+Validation (M-03) is fail-fast with exit 2: `-profile` required, worker/window/size ranges checked, `after < before` enforced, `-discover-apps` requires `-l`, malformed extension lists rejected; `0` means "unlimited/disabled" exactly where the help text says so. Regex mode uses Go RE2 semantics — no lookaround or backreferences — which is documented alongside `-F`.
 
 ## 12. AWS Integration (H-05)
 
-Required IAM: `s3:ListBucket` on the bucket (prefix-conditioned where policy allows) and `s3:GetObject` on the log prefix; `kms:Decrypt` on the bucket key when SSE-KMS is in use. A least-privilege policy example ships in the README. Credentials resolve through the standard chain (environment, `AWS_PROFILE`, instance/task roles); `-profile` selects a named shared-config profile via `WithSharedConfigProfile`, taking precedence over `AWS_PROFILE` and leaving the chain otherwise untouched, so SSO, `credential_process`, and `role_arn` profiles are the SDK's job; a direct `-role-arn` assume-role flow remains deferred. `-expected-bucket-owner` guards against cross-account bucket confusion; `-request-payer requester` supports requester-pays buckets. Archive storage classes are handled at listing time (§5.1).
+Required IAM: `s3:ListBucket` on the bucket (prefix-conditioned where policy allows) and `s3:GetObject` on the log prefix; `kms:Decrypt` on the bucket key when SSE-KMS is in use. A least-privilege policy example ships in the README. `-profile` is required and selects a named shared-config profile via `WithSharedConfigProfile`, so SSO, `credential_process`, and `role_arn` profiles are the SDK's job; a direct `-role-arn` assume-role flow remains deferred. The ambient chain (environment, `AWS_PROFILE`, instance/task roles) is deliberately not a substitute: a scan must state the account it reads from. The profile also carries the region — `LoadSharedConfigProfile` merges `~/.aws/config` and `~/.aws/credentials`, so a `region =` line in either is picked up (the credentials file wins when both declare one) — and a run whose region resolves to nothing is a usage error rather than a bare SDK failure at first call. `-region` overrides it. `-expected-bucket-owner` guards against cross-account bucket confusion; `-request-payer requester` supports requester-pays buckets. Archive storage classes are handled at listing time (§5.1).
 
 ## 13. Deferred Work (staged, per review §12)
 

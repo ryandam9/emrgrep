@@ -22,7 +22,7 @@ func writeTempConfig(t *testing.T, content string) string {
 func TestConfigFileValuesApplied(t *testing.T) {
 	p := writeTempConfig(t, "bucket: b\nprefix: logs/\nmax-line-size: 999\n")
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-config", p}, &stdout, &stderr)
+	code := run(runArgs("-config", p), &stdout, &stderr)
 	if code != 2 || !strings.Contains(stderr.String(), "-max-line-size") {
 		t.Fatalf("exit %d stderr %q", code, stderr.String())
 	}
@@ -34,7 +34,7 @@ func TestConfigFileValuesApplied(t *testing.T) {
 func TestConfigFileCLIPriority(t *testing.T) {
 	p := writeTempConfig(t, "bucket: b\nprefix: logs/\nworkers: 999\n")
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-config", p, "-workers", "0"}, &stdout, &stderr)
+	code := run(runArgs("-config", p, "-workers", "0"), &stdout, &stderr)
 	if code != 2 {
 		t.Fatalf("exit %d", code)
 	}
@@ -46,7 +46,7 @@ func TestConfigFileCLIPriority(t *testing.T) {
 func TestConfigFileUnknownKeyFails(t *testing.T) {
 	p := writeTempConfig(t, "no-such: 1\n")
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"-config", p}, &stdout, &stderr); code != 2 {
+	if code := run(runArgs("-config", p), &stdout, &stderr); code != 2 {
 		t.Fatalf("exit %d", code)
 	}
 	if !strings.Contains(stderr.String(), "unknown option") {
@@ -56,7 +56,7 @@ func TestConfigFileUnknownKeyFails(t *testing.T) {
 
 func TestConfigFileExplicitMissingFails(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-config", filepath.Join(t.TempDir(), "nope")}, &stdout, &stderr)
+	code := run(runArgs("-config", filepath.Join(t.TempDir(), "nope")), &stdout, &stderr)
 	if code != 2 || !strings.Contains(stderr.String(), "reading config file") {
 		t.Fatalf("exit %d stderr %q", code, stderr.String())
 	}
@@ -69,7 +69,7 @@ func TestConfigFileExplicitMissingFails(t *testing.T) {
 func TestConfigFileGroupParsed(t *testing.T) {
 	p := writeTempConfig(t, "group: true\ngrep: ERROR\nbucket: b\nprefix: logs/\n"+lateSentinel)
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-config", p}, &stdout, &stderr)
+	code := run(runArgs("-config", p), &stdout, &stderr)
 	if code != 2 || !strings.Contains(stderr.String(), lateSentinelErr) {
 		t.Fatalf("exit %d stderr %q", code, stderr.String())
 	}
@@ -81,7 +81,7 @@ func TestConfigFileGroupParsed(t *testing.T) {
 func TestConfigFileMDSoftDefault(t *testing.T) {
 	p := writeTempConfig(t, "bucket: b\nprefix: logs/\ngrep: ERROR\nmd: true\nworkers: 0\n")
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-config", p}, &stdout, &stderr)
+	code := run(runArgs("-config", p), &stdout, &stderr)
 	if code != 2 || !strings.Contains(stderr.String(), "-workers") {
 		t.Fatalf("file-provided md must be ignored without -app-id: exit %d stderr %q", code, stderr.String())
 	}
@@ -92,7 +92,7 @@ func TestConfigFileMDSoftDefault(t *testing.T) {
 func TestConfigFileMDExplicitCLIStaysStrict(t *testing.T) {
 	p := writeTempConfig(t, "bucket: b\nprefix: logs/\ngrep: ERROR\nmd: true\n")
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-config", p, "-md"}, &stdout, &stderr)
+	code := run(runArgs("-config", p, "-md"), &stdout, &stderr)
 	if code != 2 || !strings.Contains(stderr.String(), "-md requires -app-id") {
 		t.Fatalf("exit %d stderr %q", code, stderr.String())
 	}
@@ -104,7 +104,7 @@ func TestConfigFileMDExplicitCLIStaysStrict(t *testing.T) {
 func TestCategoryResolvesFromConfig(t *testing.T) {
 	p := writeTempConfig(t, "bucket: b\nprefix: logs/\npatterns:\n  spark: ERROR|Exception\nworkers: 0\n")
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-config", p, "-category", "spark"}, &stdout, &stderr)
+	code := run(runArgs("-config", p, "-category", "spark"), &stdout, &stderr)
 	if code != 2 || !strings.Contains(stderr.String(), "-workers") {
 		t.Fatalf("exit %d stderr %q", code, stderr.String())
 	}
@@ -115,7 +115,7 @@ func TestCategoryResolvesFromConfig(t *testing.T) {
 func TestCategoryUnknownFailsFast(t *testing.T) {
 	p := writeTempConfig(t, "bucket: b\nprefix: logs/\npatterns:\n  spark: ERROR\n  oom: OOM\n")
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-config", p, "-category", "sprk"}, &stdout, &stderr)
+	code := run(runArgs("-config", p, "-category", "sprk"), &stdout, &stderr)
 	if code != 2 || !strings.Contains(stderr.String(), "available: oom, spark") {
 		t.Fatalf("exit %d stderr %q", code, stderr.String())
 	}
@@ -124,7 +124,7 @@ func TestCategoryUnknownFailsFast(t *testing.T) {
 func TestCategoryGrepMutuallyExclusive(t *testing.T) {
 	p := writeTempConfig(t, "bucket: b\nprefix: logs/\npatterns:\n  spark: ERROR\n")
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-config", p, "-category", "spark", "-grep", "x"}, &stdout, &stderr)
+	code := run(runArgs("-config", p, "-category", "spark", "-grep", "x"), &stdout, &stderr)
 	if code != 2 || !strings.Contains(stderr.String(), "mutually exclusive") {
 		t.Fatalf("exit %d stderr %q", code, stderr.String())
 	}
@@ -136,7 +136,7 @@ func TestCategoryGrepMutuallyExclusive(t *testing.T) {
 func TestCategoryFileDefaultLosesToCLIGrep(t *testing.T) {
 	p := writeTempConfig(t, "bucket: b\nprefix: logs/\ncategory: spark\npatterns:\n  spark: ERROR\nworkers: 0\n")
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-config", p, "-grep", "FATAL"}, &stdout, &stderr)
+	code := run(runArgs("-config", p, "-grep", "FATAL"), &stdout, &stderr)
 	if code != 2 || !strings.Contains(stderr.String(), "-workers") {
 		t.Fatalf("exit %d stderr %q", code, stderr.String())
 	}
@@ -146,7 +146,7 @@ func TestCategoryFileDefaultLosesToCLIGrep(t *testing.T) {
 func TestCategoryAndGrepBothFromFileFails(t *testing.T) {
 	p := writeTempConfig(t, "bucket: b\nprefix: logs/\ngrep: ERROR\ncategory: spark\npatterns:\n  spark: X\n")
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-config", p}, &stdout, &stderr)
+	code := run(runArgs("-config", p), &stdout, &stderr)
 	if code != 2 || !strings.Contains(stderr.String(), "both grep and category") {
 		t.Fatalf("exit %d stderr %q", code, stderr.String())
 	}
@@ -155,7 +155,7 @@ func TestCategoryAndGrepBothFromFileFails(t *testing.T) {
 func TestCategoryRejectsFixedString(t *testing.T) {
 	p := writeTempConfig(t, "bucket: b\nprefix: logs/\npatterns:\n  spark: ERROR\n")
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-config", p, "-category", "spark", "-F"}, &stdout, &stderr)
+	code := run(runArgs("-config", p, "-category", "spark", "-F"), &stdout, &stderr)
 	if code != 2 || !strings.Contains(stderr.String(), "-F cannot be combined with -category") {
 		t.Fatalf("exit %d stderr %q", code, stderr.String())
 	}
@@ -166,7 +166,7 @@ func TestCategoryRejectsFixedString(t *testing.T) {
 func TestConfigFileCatSoftDefault(t *testing.T) {
 	p := writeTempConfig(t, "bucket: b\nprefix: logs/\ncat: true\npatterns:\n  spark: ERROR\nworkers: 0\n")
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-config", p, "-category", "spark"}, &stdout, &stderr)
+	code := run(runArgs("-config", p, "-category", "spark"), &stdout, &stderr)
 	if code != 2 || !strings.Contains(stderr.String(), "-workers") {
 		t.Fatalf("file-provided cat must yield to a pattern: exit %d stderr %q", code, stderr.String())
 	}
@@ -227,7 +227,7 @@ func TestConfigFileInapplicableDefaultsAreDropped(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			p := writeTempConfig(t, "bucket: b\nprefix: logs/\n"+lateSentinel+tc.keys)
 			var stdout, stderr bytes.Buffer
-			code := run(append([]string{"-config", p}, tc.args...), &stdout, &stderr)
+			code := run(append(runArgs("-config", p), tc.args...), &stdout, &stderr)
 			if code != 2 || !strings.Contains(stderr.String(), lateSentinelErr) {
 				t.Fatalf("inapplicable standing default must be dropped: exit %d stderr %q", code, stderr.String())
 			}
@@ -252,7 +252,7 @@ func TestExplicitFlagsStayStrict(t *testing.T) {
 	}
 	for _, tc := range cases {
 		var stdout, stderr bytes.Buffer
-		code := run(append([]string{"-bucket", "b", "-prefix", "p"}, tc.args...), &stdout, &stderr)
+		code := run(append(runArgs("-bucket", "b", "-prefix", "p"), tc.args...), &stdout, &stderr)
 		if code != 2 || !strings.Contains(stderr.String(), tc.want) {
 			t.Errorf("%v: exit %d stderr %q, want %q", tc.args, code, stderr.String(), tc.want)
 		}
@@ -265,7 +265,7 @@ func TestExplicitFlagsStayStrict(t *testing.T) {
 func TestApplicableDefaultsAreKept(t *testing.T) {
 	p := writeTempConfig(t, "bucket: b\nprefix: logs/\ngrep: ERROR\nl: true\ndiscover-apps: true\n"+lateSentinel)
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-config", p}, &stdout, &stderr)
+	code := run(runArgs("-config", p), &stdout, &stderr)
 	if code != 2 || !strings.Contains(stderr.String(), lateSentinelErr) {
 		t.Fatalf("applicable defaults must survive: exit %d stderr %q", code, stderr.String())
 	}
@@ -279,7 +279,7 @@ func TestFileNamesOnlyAppliesOnceCLIAddsAPattern(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	// -l is now applicable, which makes the file's group:true
 	// inapplicable — and dropped, not turned into an error.
-	code := run([]string{"-config", p, "-grep", "ERROR"}, &stdout, &stderr)
+	code := run(runArgs("-config", p, "-grep", "ERROR"), &stdout, &stderr)
 	if code != 2 || !strings.Contains(stderr.String(), lateSentinelErr) {
 		t.Fatalf("exit %d stderr %q", code, stderr.String())
 	}

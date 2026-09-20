@@ -11,10 +11,11 @@ import (
 	"github.com/ryandam9/emrgrep/internal/config"
 )
 
-// sharedConfig writes an isolated ~/.aws/{config,credentials} pair with
-// two profiles in different regions, so profile resolution can be
-// observed without touching the developer's real AWS configuration.
-func sharedConfig(t *testing.T) {
+// sharedConfigFiles writes an isolated ~/.aws/{config,credentials} pair
+// with the given contents and points the SDK at it, so profile
+// resolution can be observed without touching the developer's real AWS
+// configuration.
+func sharedConfigFiles(t *testing.T, configBody, credentialsBody string) {
 	t.Helper()
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "config")
@@ -24,10 +25,8 @@ func sharedConfig(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write(cfg, "[default]\nregion = us-east-1\n\n[profile prod-emr]\nregion = ap-southeast-2\n")
-	write(creds, ""+
-		"[default]\naws_access_key_id = AKIADEFAULTDEFAULTAA\naws_secret_access_key = defaultsecretdefaultsecretdefaultsecret0\n\n"+
-		"[prod-emr]\naws_access_key_id = AKIAPRODEMRPRODEMRAA\naws_secret_access_key = prodemrsecretprodemrsecretprodemrsecret0\n")
+	write(cfg, configBody)
+	write(creds, credentialsBody)
 	t.Setenv("AWS_CONFIG_FILE", cfg)
 	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", creds)
 	// Clear the ambient credential/region environment so only the
@@ -38,6 +37,17 @@ func sharedConfig(t *testing.T) {
 		os.Unsetenv(k)
 	}
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+}
+
+// sharedConfig is the common fixture: two profiles in different
+// regions, each declared in the config file and credentialed in the
+// credentials file.
+func sharedConfig(t *testing.T) {
+	t.Helper()
+	sharedConfigFiles(t,
+		"[default]\nregion = us-east-1\n\n[profile prod-emr]\nregion = ap-southeast-2\n",
+		"[default]\naws_access_key_id = AKIADEFAULTDEFAULTAA\naws_secret_access_key = defaultsecretdefaultsecretdefaultsecret0\n\n"+
+			"[prod-emr]\naws_access_key_id = AKIAPRODEMRPRODEMRAA\naws_secret_access_key = prodemrsecretprodemrsecretprodemrsecret0\n")
 }
 
 func load(t *testing.T, args ...string) (string, string) {
@@ -120,5 +130,52 @@ func TestUnknownProfileFails(t *testing.T) {
 	}
 	if _, err := awsconfig.LoadDefaultConfig(context.Background(), awsLoadOptions(opts)...); err == nil {
 		t.Fatal("an unknown profile must fail to load")
+	}
+}
+
+// The region may live in ~/.aws/credentials rather than ~/.aws/config:
+// a profile that exists only there, with its own "region =" line, is
+// resolved whole — credentials and region together. This is the SDK's
+// doing (LoadSharedConfigProfile merges both files), and it is the
+// arrangement most people actually have, so it is pinned here.
+func TestRegionFromCredentialsFile(t *testing.T) {
+	sharedConfigFiles(t,
+		"[default]\nregion = us-east-1\n",
+		"[default]\naws_access_key_id = AKIADEFAULTDEFAULTAA\naws_secret_access_key = defaultsecretdefaultsecretdefaultsecret0\n\n"+
+			"[creds-only]\naws_access_key_id = AKIACREDSONLYCREDSAA\naws_secret_access_key = credsonlysecretcredsonlysecretcredson0\nregion = eu-west-1\n")
+
+	region, key := load(t, "-profile", "creds-only")
+	if region != "eu-west-1" {
+		t.Errorf("region from ~/.aws/credentials = %q, want eu-west-1", region)
+	}
+	if key != "AKIACREDSONLYCREDSAA" {
+		t.Errorf("credentials-only profile used key %q, want the creds-only key", key)
+	}
+}
+
+// When both files declare a region for the same profile, the
+// credentials file wins — the SDK merges it over the config file's
+// value. Worth pinning: it decides which region the EMR lookup uses.
+func TestCredentialsRegionBeatsConfigRegion(t *testing.T) {
+	sharedConfigFiles(t,
+		"[default]\nregion = us-east-1\n\n[profile both]\nregion = us-west-1\n",
+		"[default]\naws_access_key_id = AKIADEFAULTDEFAULTAA\naws_secret_access_key = defaultsecretdefaultsecretdefaultsecret0\n\n"+
+			"[both]\naws_access_key_id = AKIABOTHBOTHBOTHBOAA\naws_secret_access_key = bothsecretbothsecretbothsecretboths0\nregion = ap-south-1\n")
+
+	if region, _ := load(t, "-profile", "both"); region != "ap-south-1" {
+		t.Errorf("region = %q, want the credentials file's ap-south-1", region)
+	}
+}
+
+// A profile with credentials but no region anywhere leaves the loaded
+// config regionless — the condition run() turns into a usage error.
+func TestProfileWithoutRegionResolvesEmpty(t *testing.T) {
+	sharedConfigFiles(t,
+		"[default]\nregion = us-east-1\n",
+		"[default]\naws_access_key_id = AKIADEFAULTDEFAULTAA\naws_secret_access_key = defaultsecretdefaultsecretdefaultsecret0\n\n"+
+			"[no-region]\naws_access_key_id = AKIANOREGIONNOREGIAA\naws_secret_access_key = noregionsecretnoregionsecretnoregio0\n")
+
+	if region, _ := load(t, "-profile", "no-region"); region != "" {
+		t.Errorf("region = %q, want empty for a profile that declares none", region)
 	}
 }

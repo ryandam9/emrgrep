@@ -7,8 +7,22 @@ import (
 	"time"
 )
 
+// parse supplies a -profile unless the case names one itself, so every
+// other test keeps exercising the rule it was written for rather than
+// tripping over the mandatory profile first. Tests about the profile
+// requirement build an Options directly.
 func parse(t *testing.T, args ...string) (*Options, error) {
 	t.Helper()
+	named := false
+	for _, a := range args {
+		if a == "-profile" || strings.HasPrefix(a, "-profile=") {
+			named = true
+			break
+		}
+	}
+	if !named {
+		args = append([]string{"-profile", "test"}, args...)
+	}
 	fs, o := NewFlagSet("test", io.Discard)
 	if err := fs.Parse(args); err != nil {
 		t.Fatalf("flag parse: %v", err)
@@ -131,8 +145,7 @@ func TestValidConfigs(t *testing.T) {
 }
 
 // -profile is independent of every other flag: it selects credentials
-// and places no constraint on the scan, and an omitted -profile leaves
-// the standard credential chain in play.
+// and places no constraint on the scan; it composes with -region.
 func TestProfileFlag(t *testing.T) {
 	o, _ := parse(t, "-bucket", "b", "-prefix", "logs/", "-grep", "x", "-profile", "prod-emr")
 	if _, err := o.Build(); err != nil {
@@ -155,10 +168,25 @@ func TestProfileFlag(t *testing.T) {
 	if o.Profile != "prod-emr" || o.Region != "ap-southeast-2" {
 		t.Errorf("got profile %q region %q", o.Profile, o.Region)
 	}
-	// Default: no profile, so the credential chain is untouched.
-	o, _ = parse(t, "-bucket", "b", "-prefix", "p")
+}
+
+// -profile is mandatory: an otherwise valid scan that names no profile
+// is a usage error, because the alternative is reading from whichever
+// account the ambient credential chain happens to point at.
+func TestProfileRequired(t *testing.T) {
+	fs, o := NewFlagSet("test", io.Discard)
+	if err := fs.Parse([]string{"-bucket", "b", "-prefix", "logs/", "-grep", "x"}); err != nil {
+		t.Fatalf("flag parse: %v", err)
+	}
 	if o.Profile != "" {
-		t.Errorf("default Profile = %q, want empty", o.Profile)
+		t.Fatalf("Profile default = %q, want empty", o.Profile)
+	}
+	_, err := o.Build()
+	if err == nil {
+		t.Fatal("a scan without -profile must not build")
+	}
+	if !strings.Contains(err.Error(), "-profile is required") {
+		t.Errorf("error %q does not mention the profile requirement", err)
 	}
 }
 

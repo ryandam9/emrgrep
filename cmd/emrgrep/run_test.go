@@ -134,8 +134,8 @@ func TestRunEndToEndMatches(t *testing.T) {
 		"logs/j-1/other/ignored.gz":  gz(t, "ERROR elsewhere\n"),
 	})
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-bucket", "b", "-prefix", "logs/j-1/",
-		"-app-id", "application_1700000000000_0042", "-grep", "ERROR", "-group=false"}, &stdout, &stderr)
+	code := run(runArgs("-bucket", "b", "-prefix", "logs/j-1/",
+		"-app-id", "application_1700000000000_0042", "-grep", "ERROR", "-group=false"), &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("exit %d want 0\nstderr: %s", code, stderr.String())
@@ -162,8 +162,8 @@ func TestRunNoMatchesExitsOne(t *testing.T) {
 	isolateHome(t)
 	withStubS3(t, map[string][]byte{appPrefix + "c_01/stderr.gz": gz(t, "all quiet\n")})
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-bucket", "b", "-prefix", "logs/j-1/",
-		"-app-id", "application_1700000000000_0042", "-grep", "ERROR"}, &stdout, &stderr)
+	code := run(runArgs("-bucket", "b", "-prefix", "logs/j-1/",
+		"-app-id", "application_1700000000000_0042", "-grep", "ERROR"), &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("exit %d want 1\nstderr: %s", code, stderr.String())
 	}
@@ -178,9 +178,9 @@ func TestRunMaxTotalMatchesStopsTheRun(t *testing.T) {
 		appPrefix + "c_02/stderr.gz": gz(t, strings.Repeat("ERROR line\n", 50)),
 	})
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-bucket", "b", "-prefix", "logs/j-1/",
+	code := run(runArgs("-bucket", "b", "-prefix", "logs/j-1/",
 		"-app-id", "application_1700000000000_0042", "-grep", "ERROR",
-		"-max-total-matches", "3", "-workers", "1", "-zip-workers", "1", "-group=false"}, &stdout, &stderr)
+		"-max-total-matches", "3", "-workers", "1", "-zip-workers", "1", "-group=false"), &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit %d want 0\nstderr: %s", code, stderr.String())
 	}
@@ -200,8 +200,8 @@ func TestRunWritesMDReport(t *testing.T) {
 		appPrefix + "c_01/stderr.gz": gz(t, "ERROR first\nquiet\nERROR second\n"),
 	})
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-bucket", "b", "-prefix", "logs/j-1/",
-		"-app-id", "application_1700000000000_0042", "-grep", "ERROR", "-md"}, &stdout, &stderr)
+	code := run(runArgs("-bucket", "b", "-prefix", "logs/j-1/",
+		"-app-id", "application_1700000000000_0042", "-grep", "ERROR", "-md"), &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit %d want 0\nstderr: %s", code, stderr.String())
 	}
@@ -238,8 +238,8 @@ func TestRunListOnlyDownloadsNothing(t *testing.T) {
 		appPrefix + "c_02/stderr.gz": gz(t, "ERROR two\n"),
 	})
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-bucket", "b", "-prefix", "logs/j-1/",
-		"-app-id", "application_1700000000000_0042"}, &stdout, &stderr)
+	code := run(runArgs("-bucket", "b", "-prefix", "logs/j-1/",
+		"-app-id", "application_1700000000000_0042"), &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit %d want 0\nstderr: %s", code, stderr.String())
 	}
@@ -258,8 +258,8 @@ func TestRunDownloadStoresFiles(t *testing.T) {
 	body := gz(t, "ERROR kept verbatim\n")
 	withStubS3(t, map[string][]byte{appPrefix + "c_01/stderr.gz": body})
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-bucket", "b", "-prefix", "logs/j-1/",
-		"-app-id", "application_1700000000000_0042", "-download"}, &stdout, &stderr)
+	code := run(runArgs("-bucket", "b", "-prefix", "logs/j-1/",
+		"-app-id", "application_1700000000000_0042", "-download"), &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit %d want 0\nstderr: %s", code, stderr.String())
 	}
@@ -288,8 +288,8 @@ func TestRunObjectErrorExitsThree(t *testing.T) {
 	stub.phantoms[appPrefix+"c_02/stderr.gz"] = true
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-bucket", "b", "-prefix", "logs/j-1/",
-		"-app-id", "application_1700000000000_0042", "-grep", "ERROR", "-group=false"}, &stdout, &stderr)
+	code := run(runArgs("-bucket", "b", "-prefix", "logs/j-1/",
+		"-app-id", "application_1700000000000_0042", "-grep", "ERROR", "-group=false"), &stdout, &stderr)
 	if code != 3 {
 		t.Fatalf("exit %d want 3\nstderr: %s", code, stderr.String())
 	}
